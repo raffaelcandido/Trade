@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Dict, Optional, Tuple
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-BRT = ZoneInfo("America/Sao_Paulo")
+try:
+    BRT = ZoneInfo("America/Sao_Paulo")
+except ZoneInfoNotFoundError:
+    # Brazil abolished DST in 2019 (permanently UTC-3); safe fallback on Windows without tzdata
+    BRT = timezone(timedelta(hours=-3), name="BRT")
 
 # Official B3 holidays for 2026 and 2027 (no trading session)
 B3_HOLIDAYS: Dict[date, str] = {

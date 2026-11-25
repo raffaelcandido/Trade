@@ -17,7 +17,19 @@ Ferramentas de Day Trade em Python padrão (sem dependências obrigatórias) ada
   - `--provider mt5`: conecta direto ao **MetaTrader 5** no Windows (`pip install MetaTrader5`).
   - `--provider yahoo`: busca ações da B3 no Yahoo Finance (`.SA` automático).
 
-## Uso rápido
+## Painel Visual Web (MetaTrader 5 BTG + Simulador)
+
+Abra o painel visual no navegador (gráfico de candles 5m em tempo real, sinal ORB 15m, Time Machine com 10.000 replays, boleta 2:1 com validação `PASS`/`BLOCK` e envio de ordens com confirmação):
+
+```bash
+python3 -m b3_trader web
+# Acesse http://127.0.0.1:8765 no navegador
+```
+
+- **Modo Simulador (padrão):** funciona sem precisar instalar nada extra — ótimo para treinar, testar o Time Machine e validar suas travas de risco.
+- **Modo MetaTrader 5 (BTG / Windows):** instale `pip install MetaTrader5`, abra o MT5 na sua **conta Demo** com `WIN$N` / `WDO$N` na *Observação do Mercado* e selecione **Modo: MetaTrader 5 (BTG)** no topo do painel. Enquanto `"paper": true` estiver em `trader/config.json`, o sistema bloqueia automaticamente contas reais por segurança.
+
+## Uso via linha de comando (CLI)
 
 ```bash
 # 1. Cria trader/config.json com limites padrão em BRL

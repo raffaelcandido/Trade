@@ -231,5 +231,58 @@ class TestEndToEndPipelines(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+class TestWebDashboardAndExecutor(unittest.TestCase):
+    def test_dashboard_plan_order_and_flatten_flow(self) -> None:
+        from b3_trader.web import B3DashboardApp
+
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / "config.json"
+            state_path = Path(td) / "broker.json"
+            cfg = dict(DEFAULT_CONFIG)
+            cfg["account_equity_brl"] = 1000.0
+            cfg["max_loss_per_trade_brl"] = 50.0
+            cfg["daily_loss_limit_brl"] = 100.0
+            cfg["min_rr"] = 2.0
+            save_json(cfg_path, cfg)
+
+            app = B3DashboardApp(config_path=cfg_path, state_path=state_path)
+            st = app.get_state(symbol="WINFUT", mode="sim")
+            self.assertEqual(st["canonical"], "WINFUT")
+            self.assertGreater(len(st["chart_bars"]), 10)
+
+            plan_res = app.compute_plan(
+                {
+                    "symbol": "WINFUT",
+                    "mode": "sim",
+                    "side": "buy",
+                    "entry_price": st["last_price"],
+                    "stop_rule": "points:200",
+                    "target_rule": "2R",
+                    "now_override": st["effective_now_brt"],
+                }
+            )
+            self.assertTrue(plan_res["ok"])
+            self.assertEqual(plan_res["verdict"]["verdict"], "PASS")
+            order = plan_res["budget"]["orders"][0]
+            self.assertEqual(order["qty"], 1)
+
+            # Unconfirmed order must be rejected
+            rej = app.place_order({"order": order, "mode": "sim", "confirmed": False, "now_override": st["effective_now_brt"]})
+            self.assertFalse(rej["ok"])
+
+            # Confirmed order executes in simulator
+            ok = app.place_order({"order": order, "mode": "sim", "confirmed": True, "now_override": st["effective_now_brt"]})
+            self.assertTrue(ok["ok"])
+
+            # Time Machine runs cleanly
+            tm = app.run_tm({"symbol": "WINFUT", "mode": "sim", "plan": plan_res["plan"], "replays": 500})
+            self.assertTrue(tm["ok"])
+            self.assertEqual(tm["timemachine"]["replays"], 500)
+
+            # Flatten closes open position
+            flat = app.flatten({"symbol": "WINFUT", "mode": "sim", "current_price": st["last_price"] + 100})
+            self.assertEqual(flat["count"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

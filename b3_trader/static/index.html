@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>B3 Day Trader — Painel Profissional (MT5 / Simulador)</title>
+  <style>
+    :root {
+      --bg: #0a0e17;
+      --panel: #111827;
+      --panel-2: #161f32;
+      --border: #1f2a40;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --green: #10b981;
+      --green-bg: rgba(16, 185, 129, 0.14);
+      --red: #ef4444;
+      --red-bg: rgba(239, 68, 68, 0.14);
+      --amber: #f59e0b;
+      --amber-bg: rgba(245, 158, 11, 0.15);
+      --blue: #3b82f6;
+      --blue-bg: rgba(59, 130, 246, 0.15);
+      --radius: 12px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      line-height: 1.45;
+    }
+    .topbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 22px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.05rem; }
+    .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
+    .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    select, input, button {
+      font-family: inherit;
+      font-size: 0.88rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 7px 11px;
+    }
+    button { cursor: pointer; font-weight: 600; transition: 0.15s ease; }
+    button:hover { filter: brightness(1.12); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .btn-green { background: var(--green); border-color: var(--green); color: #052e1e; }
+    .btn-red { background: var(--red); border-color: var(--red); color: #fff; }
+    .btn-amber { background: var(--amber); border-color: var(--amber); color: #1c1302; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700;
+    }
+    .pill-green { background: var(--green-bg); color: var(--green); border: 1px solid rgba(16,185,129,0.35); }
+    .pill-red { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.35); }
+    .pill-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(245,158,11,0.35); }
+    .pill-blue { background: var(--blue-bg); color: var(--blue); border: 1px solid rgba(59,130,246,0.35); }
+
+    .container { max-width: 1380px; margin: 0 auto; padding: 18px 20px 36px; display: flex; flex-direction: column; gap: 16px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .kpi-label { font-size: 0.76rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .kpi-value { font-size: 1.45rem; font-weight: 700; font-family: var(--mono); margin-top: 4px; }
+    .kpi-sub { font-size: 0.8rem; color: var(--muted); margin-top: 3px; }
+
+    .main-grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; }
+    @media (max-width: 980px) { .main-grid { grid-template-columns: 1fr; } }
+
+    .card-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+    .card-title { font-size: 0.95rem; font-weight: 700; }
+    .chart-wrap { position: relative; width: 100%; height: 340px; background: #080c14; border-radius: 10px; border: 1px solid var(--border); overflow: hidden; }
+    canvas { width: 100%; height: 100%; display: block; }
+
+    .signal-box {
+      padding: 12px 14px; border-radius: 10px; margin-bottom: 12px;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    .field label { display: block; font-size: 0.76rem; color: var(--muted); margin-bottom: 4px; }
+    .field input, .field select { width: 100%; }
+
+    .summary-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; margin: 10px 0 12px; }
+    .summary-table td { padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .summary-table td:last-child { text-align: right; font-family: var(--mono); font-weight: 600; }
+
+    .verdict-box { padding: 11px 13px; border-radius: 10px; margin-bottom: 12px; font-size: 0.86rem; }
+    .verdict-pass { background: var(--green-bg); border: 1px solid rgba(16,185,129,0.4); color: #a7f3d0; }
+    .verdict-block { background: var(--red-bg); border: 1px solid rgba(239,68,68,0.4); color: #fecaca; }
+
+    .odds-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; margin: 10px 0; background: #1f2937; }
+    .odds-target { background: var(--green); }
+    .odds-stop { background: var(--red); }
+    .odds-open { background: var(--amber); }
+
+    table.log-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    table.log-table th, table.log-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+    table.log-table th { color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+    .mono { font-family: var(--mono); }
+    .text-green { color: var(--green); }
+    .text-red { color: var(--red); }
+    .text-amber { color: var(--amber); }
+
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+      display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+      max-width: 460px; width: 100%; padding: 20px;
+    }
+    .modal h3 { margin-bottom: 10px; font-size: 1.05rem; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    .toast {
+      position: fixed; bottom: 20px; right: 20px; background: var(--panel-2);
+      border: 1px solid var(--border); padding: 12px 16px; border-radius: 10px;
+      font-size: 0.86rem; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: none; z-index: 60;
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot" id="connDot"></span>
+      <span>B3 Day Trader</span>
+      <span class="pill pill-amber" id="modeBadge">SIMULADOR</span>
+    </div>
+    <div class="controls">
+      <select id="symbolSelect">
+        <option value="WINFUT">WINFUT (Mini Índice)</option>
+        <option value="WDOFUT">WDOFUT (Mini Dólar)</option>
+        <option value="DOLFUT">DOLFUT (Dólar Cheio)</option>
+        <option value="PETR4">PETR4 (Petrobras)</option>
+        <option value="VALE3">VALE3 (Vale)</option>
+      </select>
+      <select id="modeSelect">
+        <option value="sim">Modo: Simulador (Treino)</option>
+        <option value="mt5">Modo: MetaTrader 5 (BTG)</option>
+      </select>
+      <span class="pill pill-blue" id="clockBadge">--:-- BRT</span>
+      <button id="btnAdvance" class="btn-amber" title="Avança 1 candle de 5 minutos no Simulador">+1 Candle (5m)</button>
+      <button id="btnConfig">Configurações</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- KPI Row -->
+    <section class="kpi-grid">
+      <div class="card">
+        <div class="kpi-label">Capital / Patrimônio</div>
+        <div class="kpi-value" id="kpiEquity">R$ 1.000,00</div>
+        <div class="kpi-sub" id="kpiConnMsg">Carregando...</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">Resultado do Dia (P&L)</div>
+        <div class="kpi-value" id="kpiPnl">R$ 0,00</div>
+        <div class="kpi-sub" id="kpiMarketReason">Pregão B3</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">Risco Diário Usado</div>
+        <div class="kpi-value" id="kpiRisk">R$ 0 / R$ 100</div>
+        <div class="kpi-sub" id="kpiRiskRem">Disponível: R$ 100,00</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">Trades Hoje</div>
+        <div class="kpi-value" id="kpiTrades">0 / 3</div>
+        <div class="kpi-sub" id="kpiSpec">Tick: 5 pts | R$ 0,20/pt</div>
+      </div>
+    </section>
+
+    <!-- Main 2-column grid -->
+    <section class="main-grid">
+      <!-- Left: Chart + Time Machine -->
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title" id="chartTitle">WINFUT — Candles 5m (Horário de Brasília)</div>
+              <div class="kpi-sub" id="chartSubtitle">Range de abertura (15m) + níveis de entrada, stop e alvo 2:1</div>
+            </div>
+            <div class="mono" style="font-size:1.25rem; font-weight:700;" id="lastPrice">--</div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="candleCanvas"></canvas>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Time Machine B3 — 10.000 Simulações Monte Carlo</div>
+              <div class="kpi-sub">Testa a probabilidade estatística do seu plano antes de arriscar R$ 1</div>
+            </div>
+            <button id="btnTimemachine" class="btn-primary">Rodar Time Machine</button>
+          </div>
+          <div id="tmContent" class="kpi-sub">Clique em "Rodar Time Machine" para simular 10.000 pregões para o plano atual.</div>
+        </div>
+      </div>
+
+      <!-- Right: Signal + Order Ticket + Positions -->
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Boleta de Execução & Gestão de Risco</div>
+            <span class="pill pill-blue" id="rrBadge">Mínimo 2:1</span>
+          </div>
+
+          <div id="signalBanner" class="signal-box pill-amber">
+            <span>Aguardando leitura do pregão...</span>
+          </div>
+
+          <div class="form-grid">
+            <div class="field">
+              <label>Lado</label>
+              <select id="sideSelect">
+                <option value="buy">COMPRA (Long)</option>
+                <option value="sell">VENDA (Short)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Preço de Entrada</label>
+              <input type="number" step="0.5" id="entryInput" />
+            </div>
+            <div class="field">
+              <label>Regra do Stop</label>
+              <select id="stopSelect">
+                <option value="points:200">200 pontos (R$ 40 no WIN)</option>
+                <option value="points:175">175 pontos (R$ 35 no WIN)</option>
+                <option value="points:250">250 pontos (R$ 50 no WIN)</option>
+                <option value="points:300">300 pontos (testar trava)</option>
+                <option value="points:8">8 pontos (WDO/DOL)</option>
+                <option value="pct:1.5">1.5% (Ações)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Alvo (Retorno:Risco)</label>
+              <select id="targetSelect">
+                <option value="2R">2R (2 para 1)</option>
+                <option value="2.5R">2.5R (2.5 para 1)</option>
+                <option value="3R">3R (3 para 1)</option>
+                <option value="1R">1R (testar trava 2:1)</option>
+              </select>
+            </div>
+          </div>
+
+          <table class="summary-table">
+            <tr><td>Quantidade calculada</td><td id="sumQty">--</td></tr>
+            <tr><td>Stop-Loss</td><td id="sumStop" class="text-red">--</td></tr>
+            <tr><td>Take-Profit (Alvo)</td><td id="sumTarget" class="text-green">--</td></tr>
+            <tr><td>Perda máx. no stop</td><td id="sumLoss" class="text-red">--</td></tr>
+            <tr><td>Ganho potencial no alvo</td><td id="sumGain" class="text-green">--</td></tr>
+            <tr><td>Margem / Capital</td><td id="sumMargin">--</td></tr>
+          </table>
+
+          <div id="verdictBox" class="verdict-box verdict-pass">Calculando risco...</div>
+
+          <div style="display:flex; gap:8px;">
+            <button id="btnSendOrder" class="btn-green" style="flex:1;" disabled>Enviar Ordem (com confirmação)</button>
+            <button id="btnFlatten" class="btn-red">Zerar Posição</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Posições Abertas & Histórico do Dia</div>
+          </div>
+          <div id="positionsWrap" style="margin-bottom:12px;"></div>
+          <div style="overflow-x:auto;">
+            <table class="log-table">
+              <thead>
+                <tr><th>Hora</th><th>Ativo</th><th>Lado</th><th>Qtd</th><th>Preço</th><th>Status</th><th>P&L</th></tr>
+              </thead>
+              <tbody id="logBody">
+                <tr><td colspan="7" style="color:var(--muted);">Nenhuma ordem executada hoje.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Confirm Order Modal -->
+  <div class="modal-backdrop" id="confirmModal">
+    <div class="modal">
+      <h3>Confirmar Envio de Ordem</h3>
+      <p style="font-size:0.88rem; color:var(--muted); margin-bottom:12px;">
+        Confira os dados antes de confirmar. Stop-Loss e Take-Profit serão enviados junto com a ordem.
+      </p>
+      <div id="confirmDetails" class="mono" style="background:#080c14; padding:12px; border-radius:8px; font-size:0.84rem; line-height:1.6;"></div>
+      <div class="modal-actions">
+        <button id="btnCancelConfirm">Cancelar</button>
+        <button id="btnDoConfirm" class="btn-green">Sim, Enviar Ordem</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config Modal -->
+  <div class="modal-backdrop" id="configModal">
+    <div class="modal">
+      <h3>Configurações da Conta B3 (trader/config.json)</h3>
+      <div class="form-grid" style="margin-top:10px;">
+        <div class="field"><label>Capital Inicial (R$)</label><input type="number" id="cfgEquity" step="50" /></div>
+        <div class="field"><label>Perda Máx. por Trade (R$)</label><input type="number" id="cfgMaxLoss" step="5" /></div>
+        <div class="field"><label>Limite de Perda Diária (R$)</label><input type="number" id="cfgDailyLoss" step="10" /></div>
+        <div class="field"><label>Mínimo Retorno:Risco (R)</label><input type="number" id="cfgMinRR" step="0.5" /></div>
+        <div class="field"><label>Máx. Trades por Dia</label><input type="number" id="cfgMaxTrades" step="1" /></div>
+        <div class="field"><label>Teto Contratos WINFUT</label><input type="number" id="cfgMaxWin" step="1" /></div>
+      </div>
+      <div class="modal-actions">
+        <button id="btnCloseConfig">Cancelar</button>
+        <button id="btnSaveConfig" class="btn-primary">Salvar Regras</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const fmtBRL = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    let appState = null;
+    let currentPlan = null;
+    let currentOrder = null;
+    let currentVerdict = null;
+
+    function showToast(msg, color = "var(--text)") {
+      const t = document.getElementById("toast");
+      t.style.color = color;
+      t.textContent = msg;
+      t.style.display = "block";
+      setTimeout(() => { t.style.display = "none"; }, 3600);
+    }
+
+    async function api(url, opts = {}) {
+      const res = await fetch(url, {
+        headers: { "Content-Type": "application/json" },
+        ...opts,
+      });
+      return res.json();
+    }
+
+    function drawChart() {
+      const canvas = document.getElementById("candleCanvas");
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = rect.height * window.devicePixelRatio;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      const W = rect.width, H = rect.height;
+      ctx.clearRect(0, 0, W, H);
+
+      if (!appState || !appState.chart_bars || !appState.chart_bars.length) return;
+      const bars = appState.chart_bars;
+      const padL = 12, padR = 66, padT = 18, padB = 26;
+      const plotW = W - padL - padR;
+      const plotH = H - padT - padB;
+
+      let minP = Math.min(...bars.map(b => b.l));
+      let maxP = Math.max(...bars.map(b => b.h));
+      if (currentPlan) {
+        minP = Math.min(minP, currentPlan.stop_price, currentPlan.target_price);
+        maxP = Math.max(maxP, currentPlan.stop_price, currentPlan.target_price);
+      }
+      const span = Math.max(1e-6, (maxP - minP) * 1.08);
+      const lo = minP - span * 0.04;
+      const hi = lo + span;
+      const yOf = (p) => padT + ((hi - p) / (hi - lo)) * plotH;
+
+      // Grid lines
+      ctx.strokeStyle = "#182235";
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "11px monospace";
+      for (let i = 0; i <= 4; i++) {
+        const p = lo + (span * i) / 4;
+        const y = yOf(p);
+        ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+        ctx.fillText(p.toFixed(appState.tick_size >= 1 ? 0 : 2), W - padR + 6, y + 4);
+      }
+
+      // Draw ORB High / Low if available
+      const entry = appState.entry || {};
+      const drawLevel = (price, color, label) => {
+        if (price == null) return;
+        const y = yOf(price);
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.setLineDash([5, 4]);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+        ctx.fillStyle = color;
+        ctx.font = "bold 10px sans-serif";
+        ctx.fillText(`${label} ${price}`, padL + 6, y - 4);
+        ctx.restore();
+      };
+
+      if (entry.or_high) drawLevel(entry.or_high, "#3b82f6", "ORB Máx");
+      if (entry.or_low) drawLevel(entry.or_low, "#3b82f6", "ORB Mín");
+
+      // Candles
+      const step = plotW / bars.length;
+      const cw = Math.max(3, step * 0.62);
+      bars.forEach((b, idx) => {
+        const x = padL + idx * step + step / 2;
+        const up = b.c >= b.o;
+        const color = up ? "#10b981" : "#ef4444";
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x, yOf(b.h));
+        ctx.lineTo(x, yOf(b.l));
+        ctx.stroke();
+        const yO = yOf(b.o), yC = yOf(b.c);
+        ctx.fillRect(x - cw / 2, Math.min(yO, yC), cw, Math.max(1.5, Math.abs(yC - yO)));
+        if (idx % 8 === 0) {
+          ctx.fillStyle = "#6b7280";
+          ctx.font = "10px monospace";
+          ctx.fillText(b.t, x - 14, H - 8);
+        }
+      });
+
+      if (currentPlan) {
+        drawLevel(currentPlan.entry_price, "#f59e0b", "ENTRADA");
+        drawLevel(currentPlan.stop_price, "#ef4444", "STOP");
+        drawLevel(currentPlan.target_price, "#10b981", "ALVO");
+      }
+    }
+
+    async function refreshPlan() {
+      if (!appState) return;
+      const symbol = document.getElementById("symbolSelect").value;
+      const mode = document.getElementById("modeSelect").value;
+      const side = document.getElementById("sideSelect").value;
+      const entry_price = parseFloat(document.getElementById("entryInput").value);
+      const stop_rule = document.getElementById("stopSelect").value;
+      const target_rule = document.getElementById("targetSelect").value;
+      if (isNaN(entry_price) || entry_price <= 0) return;
+
+      const data = await api("/api/plan", {
+        method: "POST",
+        body: JSON.stringify({
+          symbol, mode, side, entry_price, stop_rule, target_rule,
+          now_override: appState.effective_now_brt,
+        }),
+      });
+
+      if (!data.ok) {
+        document.getElementById("verdictBox").className = "verdict-box verdict-block";
+        document.getElementById("verdictBox").textContent = "Erro: " + data.error;
+        document.getElementById("btnSendOrder").disabled = true;
+        return;
+      }
+
+      currentPlan = data.plan;
+      currentVerdict = data.verdict;
+      const b = data.budget;
+
+      document.getElementById("sumStop").textContent = `${currentPlan.stop_price} (${currentPlan.risk_pts} pts)`;
+      document.getElementById("sumTarget").textContent = `${currentPlan.target_price} (${currentPlan.reward_pts} pts | ${currentPlan.rr}R)`;
+
+      const vbox = document.getElementById("verdictBox");
+      const sendBtn = document.getElementById("btnSendOrder");
+
+      if (b.status !== "sized") {
+        currentOrder = null;
+        document.getElementById("sumQty").textContent = "0 (Recusado)";
+        document.getElementById("sumLoss").textContent = fmtBRL(b.min_lot_risk_brl || 0);
+        document.getElementById("sumGain").textContent = "--";
+        document.getElementById("sumMargin").textContent = "--";
+        vbox.className = "verdict-box verdict-block";
+        vbox.innerHTML = `<strong>[RECUSADO]</strong> ${b.reason}`;
+        sendBtn.disabled = true;
+      } else {
+        currentOrder = b.orders[0];
+        const unit = currentOrder.asset_class === "future" ? "contrato(s)" : "ação(ões)";
+        document.getElementById("sumQty").textContent = `${currentOrder.qty} ${unit}`;
+        document.getElementById("sumLoss").textContent = fmtBRL(currentOrder.max_loss_brl);
+        document.getElementById("sumGain").textContent = fmtBRL(currentOrder.expected_profit_at_target_brl);
+        document.getElementById("sumMargin").textContent = fmtBRL(currentOrder.required_capital_or_margin_brl);
+
+        if (currentVerdict && currentVerdict.verdict === "PASS") {
+          vbox.className = "verdict-box verdict-pass";
+          vbox.innerHTML = `<strong>[PASS]</strong> Ordem aprovada em todas as travas de risco (${currentOrder.binding_limit}).`;
+          sendBtn.disabled = false;
+        } else {
+          vbox.className = "verdict-box verdict-block";
+          const reasons = (currentVerdict?.reasons || []).map(r => `• ${r}`).join("<br>");
+          vbox.innerHTML = `<strong>[BLOCK]</strong><br>${reasons}`;
+          sendBtn.disabled = true;
+        }
+      }
+      drawChart();
+    }
+
+    async function loadState(preserveEntry = false) {
+      const symbol = document.getElementById("symbolSelect").value;
+      const mode = document.getElementById("modeSelect").value;
+      const data = await api(`/api/state?symbol=${encodeURIComponent(symbol)}&mode=${encodeURIComponent(mode)}`);
+      if (data.ok === false) {
+        showToast(data.error || "Erro ao carregar estado", "var(--red)");
+        return;
+      }
+      appState = data;
+      const acct = data.account;
+      const conn = acct.connection;
+
+      document.getElementById("modeBadge").textContent = conn.account_type || mode.toUpperCase();
+      document.getElementById("modeBadge").className = "pill " + (conn.connected ? (conn.account_type === "REAL" ? "pill-red" : "pill-amber") : "pill-red");
+      document.getElementById("connDot").style.background = conn.connected ? "var(--green)" : "var(--red)";
+      document.getElementById("clockBadge").textContent = data.market.now_brt;
+      document.getElementById("btnAdvance").style.display = mode === "sim" ? "inline-block" : "none";
+
+      document.getElementById("kpiEquity").textContent = fmtBRL(conn.equity_brl ?? data.config.account_equity_brl);
+      document.getElementById("kpiConnMsg").textContent = conn.message;
+      const pnlEl = document.getElementById("kpiPnl");
+      pnlEl.textContent = fmtBRL(acct.realized_pnl_brl);
+      pnlEl.className = "kpi-value " + (acct.realized_pnl_brl >= 0 ? "text-green" : "text-red");
+      document.getElementById("kpiMarketReason").textContent = data.market.reason;
+      document.getElementById("kpiRisk").textContent = `${fmtBRL(acct.used_daily_risk_brl)} / ${fmtBRL(acct.daily_loss_limit_brl)}`;
+      document.getElementById("kpiRiskRem").textContent = `Disponível: ${fmtBRL(acct.remaining_daily_risk_brl)}`;
+      document.getElementById("kpiTrades").textContent = `${acct.trades_today} / ${acct.max_trades_per_day}`;
+      document.getElementById("kpiSpec").textContent = `Tick: ${data.tick_size} | R$ ${data.point_value_brl.toFixed(2)}/pt | Lote: ${data.lot_step}`;
+
+      document.getElementById("chartTitle").textContent = `${data.symbol} — ${data.description} (5m BRT)`;
+      document.getElementById("lastPrice").textContent = data.last_price;
+      document.getElementById("rrBadge").textContent = `Mínimo ${data.config.min_rr}:1`;
+
+      // Signal banner
+      const sig = data.entry || {};
+      const sb = document.getElementById("signalBanner");
+      if (sig.status === "triggered") {
+        const isBuy = sig.side === "buy";
+        sb.className = "signal-box " + (isBuy ? "pill-green" : "pill-red");
+        sb.innerHTML = `<span><strong>SINAL ORB 15m: ${isBuy ? "COMPRA" : "VENDA"}</strong> @ ${sig.entry_price} (${sig.entry_time_brt} BRT)</span><span>Range: ${sig.or_low}–${sig.or_high}</span>`;
+        if (!preserveEntry) {
+          document.getElementById("sideSelect").value = sig.side;
+          document.getElementById("entryInput").value = data.last_price;
+        }
+      } else {
+        sb.className = "signal-box pill-amber";
+        sb.innerHTML = `<span><strong>${(sig.status || "INFO").toUpperCase()}:</strong> ${sig.reason || ""}</span>`;
+        if (!preserveEntry) {
+          document.getElementById("entryInput").value = data.last_price;
+        }
+      }
+
+      // Open positions
+      const posWrap = document.getElementById("positionsWrap");
+      if (acct.positions && acct.positions.length) {
+        posWrap.innerHTML = acct.positions.map(p => `
+          <div class="signal-box pill-blue" style="margin-bottom:6px;">
+            <span><strong>ABERTA:</strong> ${p.side.toUpperCase()} ${p.qty} ${p.symbol} @ ${p.entry_price} (SL ${p.stop_loss_price} / TP ${p.take_profit_price})</span>
+            <span class="mono ${p.floating_pnl_brl >= 0 ? 'text-green' : 'text-red'}">${fmtBRL(p.floating_pnl_brl)}</span>
+          </div>
+        `).join("");
+      } else {
+        posWrap.innerHTML = `<div class="kpi-sub">Nenhuma posição aberta no momento.</div>`;
+      }
+
+      // Log
+      const logBody = document.getElementById("logBody");
+      if (acct.orders_log && acct.orders_log.length) {
+        logBody.innerHTML = acct.orders_log.map(o => `
+          <tr>
+            <td class="mono">${o.time_brt.slice(11, 19)}</td>
+            <td class="mono">${o.symbol}</td>
+            <td class="${o.side === 'buy' ? 'text-green' : 'text-red'}">${o.side.toUpperCase()}</td>
+            <td class="mono">${o.qty}</td>
+            <td class="mono">${o.price}</td>
+            <td>${o.status}</td>
+            <td class="mono ${o.pnl_brl > 0 ? 'text-green' : (o.pnl_brl < 0 ? 'text-red' : '')}">${o.pnl_brl ? fmtBRL(o.pnl_brl) : '—'}</td>
+          </tr>
+        `).join("");
+      } else {
+        logBody.innerHTML = `<tr><td colspan="7" style="color:var(--muted);">Nenhuma ordem executada hoje.</td></tr>`;
+      }
+
+      await refreshPlan();
+    }
+
+    // Event listeners
+    document.getElementById("symbolSelect").addEventListener("change", () => loadState(false));
+    document.getElementById("modeSelect").addEventListener("change", () => loadState(false));
+    ["sideSelect", "entryInput", "stopSelect", "targetSelect"].forEach(id =>
+      document.getElementById(id).addEventListener("change", refreshPlan)
+    );
+
+    document.getElementById("btnAdvance").addEventListener("click", async () => {
+      const symbol = document.getElementById("symbolSelect").value;
+      const res = await api("/api/sim/tick", { method: "POST", body: JSON.stringify({ symbol }) });
+      if (res.closed_events && res.closed_events.length) {
+        const ev = res.closed_events[0];
+        showToast(`${ev.status}: ${fmtBRL(ev.pnl_brl)}`, ev.pnl_brl >= 0 ? "var(--green)" : "var(--red)");
+      }
+      await loadState(false);
+    });
+
+    document.getElementById("btnTimemachine").addEventListener("click", async () => {
+      if (!currentPlan) return;
+      const btn = document.getElementById("btnTimemachine");
+      btn.disabled = true;
+      btn.textContent = "Simulando 10.000 pregões...";
+      const res = await api("/api/timemachine", {
+        method: "POST",
+        body: JSON.stringify({
+          symbol: currentPlan.symbol,
+          mode: document.getElementById("modeSelect").value,
+          plan: currentPlan,
+          replays: 10000,
+        }),
+      });
+      btn.disabled = false;
+      btn.textContent = "Rodar Time Machine";
+      if (!res.ok) {
+        document.getElementById("tmContent").textContent = "Erro: " + res.error;
+        return;
+      }
+      const tm = res.timemachine;
+      document.getElementById("tmContent").innerHTML = `
+        <div class="odds-bar">
+          <div class="odds-target" style="width:${tm.target_first_pct}%"></div>
+          <div class="odds-stop" style="width:${tm.stop_first_pct}%"></div>
+          <div class="odds-open" style="width:${tm.open_at_flat_by_pct}%"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:0.84rem; margin-bottom:8px;" class="mono">
+          <span class="text-green">Alvo primeiro: ${tm.target_first_pct}%</span>
+          <span class="text-red">Stop primeiro: ${tm.stop_first_pct}%</span>
+          <span class="text-amber">Aberto ${tm.flat_by_brt}: ${tm.open_at_flat_by_pct}%</span>
+        </div>
+        <div style="font-size:0.86rem;">
+          <strong>R médio:</strong> <span class="mono">${tm.avg_r >= 0 ? "+" : ""}${tm.avg_r}R</span>
+          (${fmtBRL(tm.expected_per_unit_brl)} / contrato) | <strong>Pregões:</strong> ${tm.pool_sessions}<br/>
+          <strong>Veredito:</strong> ${tm.verdict}
+        </div>
+      `;
+    });
+
+    // Order confirmation modal
+    document.getElementById("btnSendOrder").addEventListener("click", () => {
+      if (!currentOrder) return;
+      const mode = document.getElementById("modeSelect").value.toUpperCase();
+      document.getElementById("confirmDetails").innerHTML = `
+        Modo: ${mode}<br/>
+        Ativo: ${currentOrder.symbol}<br/>
+        Ordem: ${currentOrder.side.toUpperCase()} ${currentOrder.qty} contrato(s)/ação(ões)<br/>
+        Entrada: ${currentOrder.entry_price}<br/>
+        Stop-Loss: ${currentOrder.stop_loss_price} (Perda máx: ${fmtBRL(currentOrder.max_loss_brl)})<br/>
+        Take-Profit: ${currentOrder.take_profit_price} (Ganho alvo: ${fmtBRL(currentOrder.expected_profit_at_target_brl)})
+      `;
+      document.getElementById("confirmModal").classList.add("open");
+    });
+    document.getElementById("btnCancelConfirm").addEventListener("click", () =>
+      document.getElementById("confirmModal").classList.remove("open")
+    );
+    document.getElementById("btnDoConfirm").addEventListener("click", async () => {
+      document.getElementById("confirmModal").classList.remove("open");
+      const res = await api("/api/order", {
+        method: "POST",
+        body: JSON.stringify({
+          order: currentOrder,
+          mode: document.getElementById("modeSelect").value,
+          confirmed: true,
+          now_override: appState.effective_now_brt,
+        }),
+      });
+      if (res.ok) {
+        showToast(`Ordem ${res.order_id} enviada com sucesso!`, "var(--green)");
+      } else {
+        showToast(res.error || "Erro ao enviar ordem", "var(--red)");
+      }
+      await loadState(true);
+    });
+
+    document.getElementById("btnFlatten").addEventListener("click", async () => {
+      const symbol = document.getElementById("symbolSelect").value;
+      const mode = document.getElementById("modeSelect").value;
+      const res = await api("/api/flatten", {
+        method: "POST",
+        body: JSON.stringify({ symbol, mode, current_price: appState?.last_price }),
+      });
+      showToast(res.count > 0 ? `${res.count} posição(ões) zerada(s)!` : "Nenhuma posição aberta para zerar.", "var(--amber)");
+      await loadState(true);
+    });
+
+    // Config modal
+    document.getElementById("btnConfig").addEventListener("click", () => {
+      if (!appState) return;
+      const c = appState.config;
+      document.getElementById("cfgEquity").value = c.account_equity_brl;
+      document.getElementById("cfgMaxLoss").value = c.max_loss_per_trade_brl;
+      document.getElementById("cfgDailyLoss").value = c.daily_loss_limit_brl;
+      document.getElementById("cfgMinRR").value = c.min_rr;
+      document.getElementById("cfgMaxTrades").value = c.max_trades_per_day;
+      document.getElementById("cfgMaxWin").value = c.max_contracts?.WINFUT ?? 2;
+      document.getElementById("configModal").classList.add("open");
+    });
+    document.getElementById("btnCloseConfig").addEventListener("click", () =>
+      document.getElementById("configModal").classList.remove("open")
+    );
+    document.getElementById("btnSaveConfig").addEventListener("click", async () => {
+      await api("/api/config", {
+        method: "POST",
+        body: JSON.stringify({
+          account_equity_brl: parseFloat(document.getElementById("cfgEquity").value),
+          max_loss_per_trade_brl: parseFloat(document.getElementById("cfgMaxLoss").value),
+          daily_loss_limit_brl: parseFloat(document.getElementById("cfgDailyLoss").value),
+          min_rr: parseFloat(document.getElementById("cfgMinRR").value),
+          max_trades_per_day: parseInt(document.getElementById("cfgMaxTrades").value, 10),
+          max_contracts_win: parseInt(document.getElementById("cfgMaxWin").value, 10),
+        }),
+      });
+      document.getElementById("configModal").classList.remove("open");
+      showToast("Configurações salvas em trader/config.json!", "var(--green)");
+      await loadState(true);
+    });
+
+    window.addEventListener("resize", drawChart);
+    loadState(false);
+  </script>
+</body>
+</html>

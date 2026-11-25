@@ -263,7 +263,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_risk.add_argument("--json", action="store_true")
     p_risk.set_defaults(func=cmd_risk)
 
+    p_web = sub.add_parser("web", help="Abre o Painel Visual Web B3 (Simulador + MetaTrader 5)")
+    p_web.add_argument("--host", default="127.0.0.1")
+    p_web.add_argument("--port", type=int, default=8765)
+    p_web.set_defaults(func=cmd_web)
+
     return p
+
+
+def cmd_web(args: argparse.Namespace) -> int:
+    from .web import run_server
+
+    run_server(host=args.host, port=args.port)
+    return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:

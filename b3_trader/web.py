@@ -38,10 +38,12 @@ class B3DashboardApp:
         spec = get_instrument(symbol)
         cfg = load_config(self.config_path)
         bars = self.bridge.get_bars(spec.symbol, mode=mode)
+        closed_events = []
+        if mode == "mt5_paper" and bars:
+            closed_events = self.bridge.sync_positions_with_bar(spec.symbol, bars[-1])
         # In simulator mode, align clock to the latest simulated bar + 5m so ORB/risk work smoothly anytime
         if mode == "sim" and not now_override and bars:
             last_dt = bars[-1].timestamp
-            eff_now = last_dt.strftime("%Y-%m-%d %H:%M")
             from datetime import timedelta
 
             eff_dt = last_dt + timedelta(minutes=5)
@@ -91,6 +93,7 @@ class B3DashboardApp:
             "account": acct,
             "config": cfg,
             "chart_bars": chart_bars,
+            "closed_events": closed_events,
         }
 
     def compute_plan(self, payload: Dict[str, Any]) -> Dict[str, Any]:

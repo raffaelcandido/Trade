@@ -126,6 +126,43 @@ def load_bars_csv(path: Path) -> List[Bar]:
     return bars
 
 
+def resolve_mt5_symbol(mt5_mod: object, raw_symbol: str) -> str:
+    """Resolve generic B3 tickers (WINFUT, WDOFUT, DOLFUT) to the actual MT5 symbol name."""
+    spec = get_instrument(raw_symbol)
+    candidates: List[str] = [spec.symbol]
+    if spec.canonical == "WINFUT":
+        candidates.extend(["WIN$N", "WIN$", "WINFUT", "WIN$D"])
+    elif spec.canonical == "WDOFUT":
+        candidates.extend(["WDO$N", "WDO$", "WDOFUT", "WDO$D"])
+    elif spec.canonical == "DOLFUT":
+        candidates.extend(["DOL$N", "DOL$", "DOLFUT", "DOL$D"])
+    elif spec.canonical == "INDFUT":
+        candidates.extend(["IND$N", "IND$", "INDFUT", "IND$D"])
+
+    seen = set()
+    for cand in candidates:
+        if cand in seen:
+            continue
+        seen.add(cand)
+        if mt5_mod.symbol_select(cand, True):  # type: ignore[attr-defined]
+            info = mt5_mod.symbol_info(cand)  # type: ignore[attr-defined]
+            if info is not None:
+                return cand
+
+    # Fallback: search MT5 symbols starting with prefix (e.g. WIN*, WDO*, DOL*)
+    prefix = spec.canonical[:3] if spec.asset_class == "future" else spec.symbol
+    matches = mt5_mod.symbols_get(f"{prefix}*") or []  # type: ignore[attr-defined]
+    active = [m.name for m in matches if getattr(m, "visible", False) or getattr(m, "trade_mode", 0) != 0]
+    if active:
+        mt5_mod.symbol_select(active[0], True)  # type: ignore[attr-defined]
+        return str(active[0])
+
+    raise RuntimeError(
+        f"Símbolo {raw_symbol!r} não encontrado no MT5. "
+        f"Aperte Ctrl+U no MT5 do BTG e exiba {candidates[1] if len(candidates) > 1 else spec.symbol}."
+    )
+
+
 def load_bars_mt5(symbol: str, interval: str = "5m", count: int = 5000) -> List[Bar]:
     """Load bars directly from a running MetaTrader 5 terminal (Windows)."""
     try:
@@ -149,11 +186,10 @@ def load_bars_mt5(symbol: str, interval: str = "5m", count: int = 5000) -> List[
         raise RuntimeError(f"Falha ao conectar no MetaTrader 5: {mt5.last_error()}")
 
     try:
-        if not mt5.symbol_select(symbol, True):
-            raise RuntimeError(f"Símbolo {symbol!r} não encontrado no Market Watch do MT5.")
-        rates = mt5.copy_rates_from_pos(symbol, tf_map[interval], 0, count)
+        resolved = resolve_mt5_symbol(mt5, symbol)
+        rates = mt5.copy_rates_from_pos(resolved, tf_map[interval], 0, count)
         if rates is None or len(rates) == 0:
-            raise RuntimeError(f"Sem barras retornadas pelo MT5 para {symbol}.")
+            raise RuntimeError(f"Sem barras retornadas pelo MT5 para {resolved}.")
         bars: List[Bar] = []
         for r in rates:
             # MT5 B3 brokers report epoch timestamps aligned to broker/BRT time

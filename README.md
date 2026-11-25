@@ -26,8 +26,9 @@ python3 -m b3_trader web
 # Acesse http://127.0.0.1:8765 no navegador
 ```
 
-- **Modo Simulador (padrão):** funciona sem precisar instalar nada extra — ótimo para treinar, testar o Time Machine e validar suas travas de risco.
-- **Modo MetaTrader 5 (BTG / Windows):** instale `pip install MetaTrader5`, abra o MT5 na sua **conta Demo** com `WIN$N` / `WDO$N` na *Observação do Mercado* e selecione **Modo: MetaTrader 5 (BTG)** no topo do painel. Enquanto `"paper": true` estiver em `trader/config.json`, o sistema bloqueia automaticamente contas reais por segurança.
+- **Modo MT5 Ao Vivo (BTG) + Paper Local (recomendado para começar):** lê cotações e candles de 5m **em tempo real** direto do seu MetaTrader 5 do BTG (`WIN$N`, `WDO$N`, `PETR4`, etc. — mesmo em conta de produção com saldo R$ 0,00, sem precisar de conta Demo!), atualiza o painel a cada 5s e executa ordens **100% simuladas localmente** com Stop e Alvo `2:1` acompanhando o preço real da B3.
+- **Modo Simulador Offline:** funciona sem o MT5 aberto para treinar com candles simulados.
+- **Modo MetaTrader 5 REAL (BTG):** envia ordens reais via MT5 — bloqueado automaticamente enquanto `"paper": true` estiver em `trader/config.json`.
 
 ## Uso via linha de comando (CLI)
 

@@ -156,11 +156,13 @@
         <option value="VALE3">VALE3 (Vale)</option>
       </select>
       <select id="modeSelect">
-        <option value="sim">Modo: Simulador (Treino)</option>
-        <option value="mt5">Modo: MetaTrader 5 (BTG)</option>
+        <option value="mt5_paper">Modo: MT5 Ao Vivo (BTG) + Paper Local</option>
+        <option value="sim" selected>Modo: Simulador Offline (Treino)</option>
+        <option value="mt5">Modo: MetaTrader 5 REAL (BTG)</option>
       </select>
       <span class="pill pill-blue" id="clockBadge">--:-- BRT</span>
       <button id="btnAdvance" class="btn-amber" title="Avança 1 candle de 5 minutos no Simulador">+1 Candle (5m)</button>
+      <button id="btnAutoRefresh" title="Atualiza cotações automaticamente a cada 5s">Auto 5s: OFF</button>
       <button id="btnConfig">Configurações</button>
     </div>
   </header>
@@ -601,9 +603,28 @@
       await refreshPlan();
     }
 
+    let autoTimer = null;
+    function setAutoRefresh(enabled) {
+      const btn = document.getElementById("btnAutoRefresh");
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      if (enabled) {
+        btn.textContent = "Auto 5s: ON";
+        btn.className = "btn-green";
+        autoTimer = setInterval(() => loadState(true), 5000);
+      } else {
+        btn.textContent = "Auto 5s: OFF";
+        btn.className = "";
+      }
+    }
+    document.getElementById("btnAutoRefresh").addEventListener("click", () => setAutoRefresh(!autoTimer));
+
     // Event listeners
     document.getElementById("symbolSelect").addEventListener("change", () => loadState(false));
-    document.getElementById("modeSelect").addEventListener("change", () => loadState(false));
+    document.getElementById("modeSelect").addEventListener("change", (e) => {
+      const m = e.target.value;
+      setAutoRefresh(m === "mt5_paper" || m === "mt5");
+      loadState(false);
+    });
     ["sideSelect", "entryInput", "stopSelect", "targetSelect"].forEach(id =>
       document.getElementById(id).addEventListener("change", refreshPlan)
     );

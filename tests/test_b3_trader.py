@@ -283,6 +283,47 @@ class TestWebDashboardAndExecutor(unittest.TestCase):
             flat = app.flatten({"symbol": "WINFUT", "mode": "sim", "current_price": st["last_price"] + 100})
             self.assertEqual(flat["count"], 1)
 
+    def test_mt5_paper_live_bar_sync_triggers_tp(self) -> None:
+        from b3_trader.mt5_executor import BrokerBridge
+
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / "config.json"
+            state_path = Path(td) / "broker.json"
+            cfg = dict(DEFAULT_CONFIG)
+            cfg["account_equity_brl"] = 1000.0
+            cfg["max_loss_per_trade_brl"] = 50.0
+            cfg["daily_loss_limit_brl"] = 100.0
+            cfg["min_rr"] = 2.0
+            save_json(cfg_path, cfg)
+
+            bridge = BrokerBridge(config_path=cfg_path, state_path=state_path)
+            order = {
+                "symbol": "WINFUT",
+                "side": "buy",
+                "qty": 1,
+                "entry_price": 128500.0,
+                "stop_loss_price": 128300.0,
+                "take_profit_price": 128900.0,
+                "reduce_only": False,
+            }
+            res = bridge.execute_order(order, mode="mt5_paper", confirmed=True, now_override="2026-11-25 10:30")
+            self.assertTrue(res["ok"])
+            self.assertTrue(res["order_id"].startswith("PAPER-"))
+
+            # Simulate a live BTG MT5 bar that hits Take-Profit (128900)
+            live_bar = Bar(
+                timestamp=now_brt("2026-11-25 10:45"),
+                open=128750.0,
+                high=128950.0,
+                low=128700.0,
+                close=128920.0,
+                volume=12000.0,
+            )
+            closed = bridge.sync_positions_with_bar("WINFUT", live_bar)
+            self.assertEqual(len(closed), 1)
+            self.assertEqual(closed[0]["status"], "FECHADO (TAKE-PROFIT)")
+            self.assertEqual(closed[0]["pnl_brl"], 80.0)
+
 
 if __name__ == "__main__":
     unittest.main()

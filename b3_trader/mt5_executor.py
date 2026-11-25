@@ -134,33 +134,49 @@ class BrokerBridge:
         save_json(self.state_path, st)
 
     def connection_info(self, mode: str = "sim") -> Dict[str, Any]:
-        if mode == "mt5":
+        cfg = load_config(self.config_path)
+        st = self._load_state()
+        if mode in ("mt5", "mt5_paper"):
             if not _mt5_available():
                 return {
-                    "mode": "mt5",
+                    "mode": mode,
                     "connected": False,
-                    "account_type": "unavailable",
-                    "message": "MetaTrader 5 não instalado neste sistema (use no Windows com BTG MT5 aberto ou alterne para Simulador).",
+                    "account_type": "INDISPONÍVEL",
+                    "equity_brl": round(float(cfg["account_equity_brl"]) + float(st["realized_pnl_brl"]), 2),
+                    "message": "MetaTrader 5 não instalado neste sistema (use no Windows com BTG MT5 aberto ou alterne para Simulador Offline).",
                 }
             import MetaTrader5 as mt5  # type: ignore
 
             if not mt5.initialize():
                 return {
-                    "mode": "mt5",
+                    "mode": mode,
                     "connected": False,
-                    "account_type": "disconnected",
+                    "account_type": "DESCONECTADO",
+                    "equity_brl": round(float(cfg["account_equity_brl"]) + float(st["realized_pnl_brl"]), 2),
                     "message": f"MT5 instalado, mas não conectado: {mt5.last_error()}",
                 }
             try:
                 info = mt5.account_info()
                 if info is None:
                     return {
-                        "mode": "mt5",
+                        "mode": mode,
                         "connected": False,
-                        "account_type": "no_account",
+                        "account_type": "SEM CONTA",
+                        "equity_brl": round(float(cfg["account_equity_brl"]) + float(st["realized_pnl_brl"]), 2),
                         "message": "Nenhuma conta logada no MetaTrader 5.",
                     }
                 is_demo = info.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
+                if mode == "mt5_paper":
+                    return {
+                        "mode": "mt5_paper",
+                        "connected": True,
+                        "account_type": "MT5 AO VIVO + PAPER",
+                        "login": info.login,
+                        "server": info.server,
+                        "equity_brl": round(float(cfg["account_equity_brl"]) + float(st["realized_pnl_brl"]), 2),
+                        "balance_brl": float(cfg["account_equity_brl"]),
+                        "message": f"Cotações AO VIVO via {info.server} | Ordens 100% simuladas (Paper local — zero risco real).",
+                    }
                 return {
                     "mode": "mt5",
                     "connected": True,
@@ -174,20 +190,18 @@ class BrokerBridge:
             finally:
                 mt5.shutdown()
 
-        cfg = load_config(self.config_path)
-        st = self._load_state()
         return {
             "mode": "sim",
             "connected": True,
             "account_type": "SIMULADOR",
             "equity_brl": round(float(cfg["account_equity_brl"]) + float(st["realized_pnl_brl"]), 2),
             "balance_brl": float(cfg["account_equity_brl"]),
-            "message": "Modo Simulador ativo (dados de treino — nenhuma ordem real enviada).",
+            "message": "Modo Simulador Offline ativo (dados de treino — nenhuma ordem real enviada).",
         }
 
     def get_bars(self, symbol: str, mode: str = "sim", count: int = 2500) -> List[Bar]:
         spec = get_instrument(symbol)
-        if mode == "mt5":
+        if mode in ("mt5", "mt5_paper"):
             return load_bars_mt5(spec.symbol, interval="5m", count=count)
 
         st = self._load_state()
@@ -198,6 +212,50 @@ class BrokerBridge:
             self._save_state(st)
             return bars
         return [_dict_to_bar(d) for d in cached]
+
+    def sync_positions_with_bar(self, symbol: str, bar: Bar) -> List[Dict[str, Any]]:
+        """Update floating P&L and trigger Paper SL/TP against a live or simulated bar."""
+        spec = get_instrument(symbol)
+        st = self._load_state()
+        if not st.get("positions"):
+            return []
+
+        remaining = []
+        closed_events = []
+        for pos in st.get("positions", []):
+            if pos["canonical"] != spec.canonical:
+                remaining.append(pos)
+                continue
+            sl = float(pos["stop_loss_price"])
+            tp = float(pos["take_profit_price"])
+            side = pos["side"]
+            hit_sl = (bar.low <= sl) if side == "buy" else (bar.high >= sl)
+            hit_tp = (bar.high >= tp) if side == "buy" else (bar.low <= tp)
+            if hit_sl or hit_tp:
+                exit_px = sl if hit_sl else tp
+                reason = "STOP-LOSS" if hit_sl else "TAKE-PROFIT"
+                pnl = spec.pnl_brl(float(pos["entry_price"]), exit_px, int(pos["qty"]), side)
+                st["realized_pnl_brl"] = round(float(st["realized_pnl_brl"]) + pnl, 2)
+                evt = {
+                    "id": str(uuid.uuid4())[:8],
+                    "time_brt": bar.timestamp.strftime("%Y-%m-%d %H:%M BRT"),
+                    "symbol": pos["symbol"],
+                    "side": "sell" if side == "buy" else "buy",
+                    "qty": pos["qty"],
+                    "price": exit_px,
+                    "status": f"FECHADO ({reason})",
+                    "pnl_brl": pnl,
+                }
+                st.setdefault("orders_log", []).insert(0, evt)
+                closed_events.append(evt)
+            else:
+                pos["last_price"] = bar.close
+                pos["floating_pnl_brl"] = spec.pnl_brl(float(pos["entry_price"]), bar.close, int(pos["qty"]), side)
+                remaining.append(pos)
+
+        st["positions"] = remaining
+        self._save_state(st)
+        return closed_events
 
     def advance_sim_bar(self, symbol: str) -> Dict[str, Any]:
         """Advance one 5-minute simulated candle and evaluate open SL/TP triggers."""
@@ -221,43 +279,8 @@ class BrokerBridge:
         )
         bars.append(new_bar)
         st.setdefault("sim_bars", {})[spec.canonical] = [_bar_to_dict(b) for b in bars]
-
-        # Check if any open simulated position hit Stop or Target
-        remaining = []
-        closed_events = []
-        for pos in st.get("positions", []):
-            if pos["canonical"] != spec.canonical:
-                remaining.append(pos)
-                continue
-            sl = float(pos["stop_loss_price"])
-            tp = float(pos["take_profit_price"])
-            side = pos["side"]
-            hit_sl = (l <= sl) if side == "buy" else (h >= sl)
-            hit_tp = (h >= tp) if side == "buy" else (l <= tp)
-            if hit_sl or hit_tp:
-                exit_px = sl if hit_sl else tp
-                reason = "STOP-LOSS" if hit_sl else "TAKE-PROFIT"
-                pnl = spec.pnl_brl(float(pos["entry_price"]), exit_px, int(pos["qty"]), side)
-                st["realized_pnl_brl"] = round(float(st["realized_pnl_brl"]) + pnl, 2)
-                evt = {
-                    "id": str(uuid.uuid4())[:8],
-                    "time_brt": new_bar.timestamp.strftime("%Y-%m-%d %H:%M BRT"),
-                    "symbol": pos["symbol"],
-                    "side": "sell" if side == "buy" else "buy",
-                    "qty": pos["qty"],
-                    "price": exit_px,
-                    "status": f"FECHADO ({reason})",
-                    "pnl_brl": pnl,
-                }
-                st["orders_log"].insert(0, evt)
-                closed_events.append(evt)
-            else:
-                pos["last_price"] = c
-                pos["floating_pnl_brl"] = spec.pnl_brl(float(pos["entry_price"]), c, int(pos["qty"]), side)
-                remaining.append(pos)
-
-        st["positions"] = remaining
         self._save_state(st)
+        closed_events = self.sync_positions_with_bar(spec.symbol, new_bar)
         return {"bar": _bar_to_dict(new_bar), "closed_events": closed_events}
 
     def get_account_summary(self, mode: str = "sim") -> Dict[str, Any]:
@@ -329,14 +352,16 @@ class BrokerBridge:
             if not mt5.initialize():
                 return {"ok": False, "error": f"Falha MT5: {mt5.last_error()}"}
             try:
-                mt5.symbol_select(spec.symbol, True)
-                tick = mt5.symbol_info_tick(spec.symbol)
+                from .providers import resolve_mt5_symbol
+
+                mt5_sym = resolve_mt5_symbol(mt5, spec.symbol)
+                tick = mt5.symbol_info_tick(mt5_sym)
                 if tick is None:
-                    return {"ok": False, "error": f"Sem cotação em tempo real no MT5 para {spec.symbol}."}
+                    return {"ok": False, "error": f"Sem cotação em tempo real no MT5 para {mt5_sym}."}
                 price = tick.ask if side == "buy" else tick.bid
                 req = {
                     "action": mt5.TRADE_ACTION_DEAL,
-                    "symbol": spec.symbol,
+                    "symbol": mt5_sym,
                     "volume": float(qty),
                     "type": mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL,
                     "price": price,
@@ -356,7 +381,8 @@ class BrokerBridge:
             finally:
                 mt5.shutdown()
         else:
-            broker_id = f"SIM-{str(uuid.uuid4())[:6].upper()}"
+            prefix = "PAPER" if mode == "mt5_paper" else "SIM"
+            broker_id = f"{prefix}-{str(uuid.uuid4())[:6].upper()}"
             fill_price = entry_px
 
         st["trades_today"] = int(st["trades_today"]) + 1
@@ -376,6 +402,11 @@ class BrokerBridge:
             "opened_at_brt": dt_now.strftime("%Y-%m-%d %H:%M:%S BRT"),
         }
         st.setdefault("positions", []).append(pos)
+        status_label = (
+            "EXECUTADA (MT5 REAL)"
+            if mode == "mt5"
+            else ("EXECUTADA (PAPER AO VIVO)" if mode == "mt5_paper" else "EXECUTADA (SIMULADOR)")
+        )
         st.setdefault("orders_log", []).insert(
             0,
             {
@@ -387,7 +418,7 @@ class BrokerBridge:
                 "price": fill_price,
                 "sl": sl,
                 "tp": tp,
-                "status": "EXECUTADA (MT5)" if mode == "mt5" else "EXECUTADA (SIMULADOR)",
+                "status": status_label,
                 "pnl_brl": 0.0,
             },
         )

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+trader/state/
+trader/entry.json
+trader/plan.json
+trader/orders.json
+trader/timemachine.json

@@ -127,39 +127,73 @@ def load_bars_csv(path: Path) -> List[Bar]:
 
 
 def resolve_mt5_symbol(mt5_mod: object, raw_symbol: str) -> str:
-    """Resolve generic B3 tickers (WINFUT, WDOFUT, DOLFUT) to the actual MT5 symbol name."""
+    """Resolve generic B3 tickers (WINFUT, WDOFUT, DOLFUT) to the live active MT5 symbol."""
     spec = get_instrument(raw_symbol)
-    candidates: List[str] = [spec.symbol]
-    if spec.canonical == "WINFUT":
-        candidates.extend(["WIN$N", "WIN$", "WINFUT", "WIN$D"])
-    elif spec.canonical == "WDOFUT":
-        candidates.extend(["WDO$N", "WDO$", "WDOFUT", "WDO$D"])
-    elif spec.canonical == "DOLFUT":
-        candidates.extend(["DOL$N", "DOL$", "DOLFUT", "DOL$D"])
-    elif spec.canonical == "INDFUT":
-        candidates.extend(["IND$N", "IND$", "INDFUT", "IND$D"])
+    now_epoch = int(datetime.now(timezone.utc).timestamp())
 
+    def _score_symbol(name: str) -> Optional[tuple[int, int, int]]:
+        info = mt5_mod.symbol_info(name)  # type: ignore[attr-defined]
+        if info is None:
+            return None
+        exp = int(getattr(info, "expiration_time", 0) or 0)
+        is_not_expired = 1 if (exp == 0 or exp > now_epoch) else 0
+        tick = mt5_mod.symbol_info_tick(name)  # type: ignore[attr-defined]
+        tick_time = int(getattr(tick, "time", 0) or 0) if tick is not None else 0
+        has_price = 1 if (tick is not None and (getattr(tick, "last", 0) > 0 or getattr(tick, "bid", 0) > 0)) else 0
+        return (is_not_expired, has_price, tick_time)
+
+    # First try explicit continuous symbols if they have live data
+    explicit_candidates: List[str] = []
+    if spec.canonical == "WINFUT":
+        explicit_candidates = ["WIN$N", "WIN$", "WINFUT", "WIN$D"]
+    elif spec.canonical == "WDOFUT":
+        explicit_candidates = ["WDO$N", "WDO$", "WDOFUT", "WDO$D"]
+    elif spec.canonical == "DOLFUT":
+        explicit_candidates = ["DOL$N", "DOL$", "DOLFUT", "DOL$D"]
+    elif spec.canonical == "INDFUT":
+        explicit_candidates = ["IND$N", "IND$", "INDFUT", "IND$D"]
+    else:
+        explicit_candidates = [spec.symbol]
+
+    if spec.symbol not in explicit_candidates:
+        explicit_candidates.insert(0, spec.symbol)
+
+    scored: List[tuple[tuple[int, int, int], str]] = []
     seen = set()
-    for cand in candidates:
+    for cand in explicit_candidates:
         if cand in seen:
             continue
         seen.add(cand)
         if mt5_mod.symbol_select(cand, True):  # type: ignore[attr-defined]
-            info = mt5_mod.symbol_info(cand)  # type: ignore[attr-defined]
-            if info is not None:
-                return cand
+            sc = _score_symbol(cand)
+            if sc is not None and sc[0] == 1 and sc[2] > 0:
+                scored.append((sc, cand))
 
-    # Fallback: search MT5 symbols starting with prefix (e.g. WIN*, WDO*, DOL*)
+    # Also inspect all matching prefix symbols (e.g. WINZ26, WDOZ26) and prefer non-expired with newest tick
     prefix = spec.canonical[:3] if spec.asset_class == "future" else spec.symbol
     matches = mt5_mod.symbols_get(f"{prefix}*") or []  # type: ignore[attr-defined]
-    active = [m.name for m in matches if getattr(m, "visible", False) or getattr(m, "trade_mode", 0) != 0]
-    if active:
-        mt5_mod.symbol_select(active[0], True)  # type: ignore[attr-defined]
-        return str(active[0])
+    for m in matches:
+        name = str(m.name)
+        if name in seen:
+            continue
+        # Only consider standard contract/stock lengths (e.g. WINZ26, WDOZ26, PETR4)
+        if spec.asset_class == "future" and len(name) > 7:
+            continue
+        seen.add(name)
+        mt5_mod.symbol_select(name, True)  # type: ignore[attr-defined]
+        sc = _score_symbol(name)
+        if sc is not None:
+            scored.append((sc, name))
+
+    if scored:
+        scored.sort(key=lambda item: item[0], reverse=True)
+        best = scored[0][1]
+        mt5_mod.symbol_select(best, True)  # type: ignore[attr-defined]
+        return best
 
     raise RuntimeError(
         f"Símbolo {raw_symbol!r} não encontrado no MT5. "
-        f"Aperte Ctrl+U no MT5 do BTG e exiba {candidates[1] if len(candidates) > 1 else spec.symbol}."
+        f"Adicione o contrato vigente (ex: WINZ26 / WDOZ26) na Observação do Mercado do MT5."
     )
 
 
@@ -192,8 +226,8 @@ def load_bars_mt5(symbol: str, interval: str = "5m", count: int = 5000) -> List[
             raise RuntimeError(f"Sem barras retornadas pelo MT5 para {resolved}.")
         bars: List[Bar] = []
         for r in rates:
-            # MT5 B3 brokers report epoch timestamps aligned to broker/BRT time
-            ts = datetime.fromtimestamp(int(r["time"]), tz=timezone.utc).astimezone(BRT)
+            # MT5 encodes B3 broker server time (BRT) directly in the epoch timestamp
+            ts = datetime.fromtimestamp(int(r["time"]), tz=timezone.utc).replace(tzinfo=BRT)
             bars.append(
                 Bar(
                     timestamp=ts,

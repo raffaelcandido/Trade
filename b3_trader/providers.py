@@ -131,7 +131,7 @@ def resolve_mt5_symbol(mt5_mod: object, raw_symbol: str) -> str:
     spec = get_instrument(raw_symbol)
     now_epoch = int(datetime.now(timezone.utc).timestamp())
 
-    def _score_symbol(name: str) -> Optional[tuple[int, int, int]]:
+    def _score_symbol(name: str) -> Optional[tuple[int, int, int, int]]:
         info = mt5_mod.symbol_info(name)  # type: ignore[attr-defined]
         if info is None:
             return None
@@ -140,7 +140,15 @@ def resolve_mt5_symbol(mt5_mod: object, raw_symbol: str) -> str:
         tick = mt5_mod.symbol_info_tick(name)  # type: ignore[attr-defined]
         tick_time = int(getattr(tick, "time", 0) or 0) if tick is not None else 0
         has_price = 1 if (tick is not None and (getattr(tick, "last", 0) > 0 or getattr(tick, "bid", 0) > 0)) else 0
-        return (is_not_expired, has_price, tick_time)
+        # For active futures, prefer the NEAREST upcoming expiration (front-month contract, e.g. WINZ26 over WING27)
+        # Continuous symbols (exp == 0) get highest priority when they have a live price
+        if exp == 0:
+            nearness = 0
+        elif is_not_expired:
+            nearness = -exp
+        else:
+            nearness = -10**12 + exp
+        return (is_not_expired, has_price, nearness, tick_time)
 
     # First try explicit continuous symbols if they have live data
     explicit_candidates: List[str] = []
@@ -158,7 +166,7 @@ def resolve_mt5_symbol(mt5_mod: object, raw_symbol: str) -> str:
     if spec.symbol not in explicit_candidates:
         explicit_candidates.insert(0, spec.symbol)
 
-    scored: List[tuple[tuple[int, int, int], str]] = []
+    scored: List[tuple[tuple[int, int, int, int], str]] = []
     seen = set()
     for cand in explicit_candidates:
         if cand in seen:
@@ -166,10 +174,10 @@ def resolve_mt5_symbol(mt5_mod: object, raw_symbol: str) -> str:
         seen.add(cand)
         if mt5_mod.symbol_select(cand, True):  # type: ignore[attr-defined]
             sc = _score_symbol(cand)
-            if sc is not None and sc[0] == 1 and sc[2] > 0:
+            if sc is not None and sc[0] == 1 and sc[1] == 1 and sc[3] > 0:
                 scored.append((sc, cand))
 
-    # Also inspect all matching prefix symbols (e.g. WINZ26, WDOZ26) and prefer non-expired with newest tick
+    # Also inspect all matching prefix symbols (e.g. WINZ26, WDOZ26) and prefer front-month non-expired with live price
     prefix = spec.canonical[:3] if spec.asset_class == "future" else spec.symbol
     matches = mt5_mod.symbols_get(f"{prefix}*") or []  # type: ignore[attr-defined]
     for m in matches:

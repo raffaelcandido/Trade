@@ -156,13 +156,13 @@
         <option value="VALE3">VALE3 (Vale)</option>
       </select>
       <select id="modeSelect">
-        <option value="mt5_paper">Modo: MT5 Ao Vivo (BTG) + Paper Local</option>
-        <option value="sim" selected>Modo: Simulador Offline (Treino)</option>
+        <option value="mt5_paper" selected>Modo: MT5 Ao Vivo (BTG) + Paper Local</option>
+        <option value="sim">Modo: Simulador Offline (Treino)</option>
         <option value="mt5">Modo: MetaTrader 5 REAL (BTG)</option>
       </select>
       <span class="pill pill-blue" id="clockBadge">--:-- BRT</span>
-      <button id="btnAdvance" class="btn-amber" title="Avança 1 candle de 5 minutos no Simulador">+1 Candle (5m)</button>
-      <button id="btnAutoRefresh" title="Atualiza cotações automaticamente a cada 5s">Auto 5s: OFF</button>
+      <span class="pill pill-green" id="livePulseBadge" title="Atualização automática sempre ativa a cada 2 segundos">● AO VIVO 2s</span>
+      <button id="btnAdvance" class="btn-amber" style="display:none;" title="Avança 1 candle de 5 minutos no Simulador">+1 Candle (5m)</button>
       <button id="btnConfig">Configurações</button>
     </div>
   </header>
@@ -189,6 +189,24 @@
         <div class="kpi-label">Trades Hoje</div>
         <div class="kpi-value" id="kpiTrades">0 / 3</div>
         <div class="kpi-sub" id="kpiSpec">Tick: 5 pts | R$ 0,20/pt</div>
+      </div>
+    </section>
+
+    <!-- Autopilot Control Bar -->
+    <section class="card" id="autopilotBar" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <button id="btnToggleAutopilot" class="btn-amber">Robô Automático: DESLIGADO</button>
+        <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.82rem; cursor:pointer;">
+          <input type="checkbox" id="chkDynAtr" checked style="width:auto; padding:0;" />
+          Stop Dinâmico (ATR)
+        </label>
+        <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.82rem; cursor:pointer;">
+          <input type="checkbox" id="chkBreakeven" checked style="width:auto; padding:0;" />
+          Breakeven em 1R (0x0)
+        </label>
+      </div>
+      <div style="font-size:0.82rem; color:var(--muted);" id="autopilotStatusText">
+        Analisando contexto intraday (EMA9 / EMA21 / VWAP / ATR)...
       </div>
     </section>
 
@@ -278,6 +296,7 @@
             <div class="field">
               <label>Regra do Stop</label>
               <select id="stopSelect">
+                <option value="auto_atr" selected>Dinâmico (ATR automático)</option>
                 <option value="points:200">200 pontos (R$ 40 no WIN)</option>
                 <option value="points:175">175 pontos (R$ 35 no WIN)</option>
                 <option value="points:250">250 pontos (R$ 50 no WIN)</option>
@@ -478,6 +497,27 @@
           ctx.fillText(b.t, x - 14, H - 8);
         }
       });
+
+      // EMA 9 (cyan) and EMA 21 (purple) trend overlays
+      const drawSeries = (arr, color) => {
+        if (!arr || arr.length < 2) return;
+        const offset = bars.length - arr.length;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        arr.forEach((val, i) => {
+          const x = padL + (i + offset) * step + step / 2;
+          const y = yOf(val);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.restore();
+      };
+      if (appState.context) {
+        drawSeries(appState.context.ema9_tail, "#38bdf8");
+        drawSeries(appState.context.ema21_tail, "#a855f7");
+      }
 
       if (openPos) {
         drawLevel(openPos.entry_price, "#f59e0b", "ENTRADA ABERTA");
@@ -684,35 +724,109 @@
         logBody.innerHTML = `<tr><td colspan="7" style="color:var(--muted);">Nenhuma ordem executada hoje.</td></tr>`;
       }
 
-      await refreshPlan();
-    }
+      // Autopilot bar status & controls
+      const ap = data.autopilot || {};
+      const ctxInfo = data.context || {};
+      const apBtn = document.getElementById("btnToggleAutopilot");
+      const apEnabled = Boolean(data.config?.autopilot_enabled);
+      apBtn.textContent = apEnabled ? "🤖 Robô Automático: LIGADO" : "🤖 Robô Automático: DESLIGADO";
+      apBtn.className = apEnabled ? "btn-green" : "btn-amber";
+      document.getElementById("chkDynAtr").checked = Boolean(data.config?.dynamic_atr_stop ?? true);
+      document.getElementById("chkBreakeven").checked = Boolean(data.config?.breakeven_at_1r ?? true);
+      document.getElementById("autopilotStatusText").innerHTML =
+        `<strong>Tendência:</strong> ${ctxInfo.trend || "--"} | <strong>VWAP:</strong> ${ctxInfo.vwap || "--"} | <strong>ATR(14):</strong> ${ctxInfo.atr14 || "--"} pts — ${ap.message || ""}`;
+      if (ap.action === "executed" || ap.action === "breakeven" || ap.action === "flattened_eod") {
+        showToast(ap.message, "var(--green)");
+      }
 
-    let autoTimer = null;
-    function setAutoRefresh(enabled) {
-      const btn = document.getElementById("btnAutoRefresh");
-      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
-      if (enabled) {
-        btn.textContent = "Auto 2s: ON";
-        btn.className = "btn-green";
-        autoTimer = setInterval(() => loadState(true), 2000);
-      } else {
-        btn.textContent = "Auto 2s: OFF";
-        btn.className = "";
+      await refreshPlan();
+
+      // Auto-run Time Machine once whenever symbol / side / stop / target changes
+      if (currentPlan) {
+        const tmKey = `${currentPlan.symbol}:${currentPlan.side}:${currentPlan.stop_rule}:${currentPlan.target_rule}:${mode}`;
+        if (tmKey !== lastTmKey && !tmBusy) {
+          lastTmKey = tmKey;
+          runTimeMachineNow(true);
+        }
       }
     }
-    document.getElementById("btnAutoRefresh").addEventListener("click", () => setAutoRefresh(!autoTimer));
+
+    let lastTmKey = "";
+    let tmBusy = false;
+
+    async function runTimeMachineNow(silent = false) {
+      if (!currentPlan || tmBusy) return;
+      tmBusy = true;
+      const btn = document.getElementById("btnTimemachine");
+      btn.disabled = true;
+      btn.textContent = silent ? "Atualizando 10.000..." : "Simulando 10.000 pregões...";
+      try {
+        const res = await api("/api/timemachine", {
+          method: "POST",
+          body: JSON.stringify({
+            symbol: currentPlan.symbol,
+            mode: document.getElementById("modeSelect").value,
+            plan: currentPlan,
+            replays: 10000,
+          }),
+        });
+        if (!res.ok) {
+          document.getElementById("tmContent").textContent = "Erro: " + res.error;
+          return;
+        }
+        const tm = res.timemachine;
+        document.getElementById("tmContent").innerHTML = `
+          <div class="odds-bar">
+            <div class="odds-target" style="width:${tm.target_first_pct}%"></div>
+            <div class="odds-stop" style="width:${tm.stop_first_pct}%"></div>
+            <div class="odds-open" style="width:${tm.open_at_flat_by_pct}%"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:0.84rem; margin-bottom:8px;" class="mono">
+            <span class="text-green">Alvo primeiro: ${tm.target_first_pct}%</span>
+            <span class="text-red">Stop primeiro: ${tm.stop_first_pct}%</span>
+            <span class="text-amber">Aberto ${tm.flat_by_brt}: ${tm.open_at_flat_by_pct}%</span>
+          </div>
+          <div style="font-size:0.86rem;">
+            <strong>R médio:</strong> <span class="mono">${tm.avg_r >= 0 ? "+" : ""}${tm.avg_r}R</span>
+            (${fmtBRL(tm.expected_per_unit_brl)} / contrato) | <strong>Pregões:</strong> ${tm.pool_sessions}<br/>
+            <strong>Veredito:</strong> ${tm.verdict}
+          </div>
+        `;
+      } finally {
+        tmBusy = false;
+        btn.disabled = false;
+        btn.textContent = "Recalcular Time Machine";
+      }
+    }
+
+    document.getElementById("btnToggleAutopilot").addEventListener("click", async () => {
+      if (!appState) return;
+      const next = !Boolean(appState.config?.autopilot_enabled);
+      await api("/api/config", { method: "POST", body: JSON.stringify({ autopilot_enabled: next }) });
+      showToast(next ? "🤖 Robô Automático LIGADO!" : "Robô Automático pausado.", next ? "var(--green)" : "var(--amber)");
+      await loadState(true);
+    });
+    document.getElementById("chkDynAtr").addEventListener("change", async (e) => {
+      await api("/api/config", { method: "POST", body: JSON.stringify({ dynamic_atr_stop: e.target.checked }) });
+      showToast("Stop Dinâmico (ATR) atualizado!", "var(--green)");
+      await loadState(true);
+    });
+    document.getElementById("chkBreakeven").addEventListener("change", async (e) => {
+      await api("/api/config", { method: "POST", body: JSON.stringify({ breakeven_at_1r: e.target.checked }) });
+      showToast("Breakeven em 1R atualizado!", "var(--green)");
+      await loadState(true);
+    });
     document.getElementById("chkPreviewLines").addEventListener("change", drawChart);
     document.getElementById("btnQuickFlatten").addEventListener("click", () => document.getElementById("btnFlatten").click());
 
     // Event listeners
-    document.getElementById("symbolSelect").addEventListener("change", () => loadState(false));
-    document.getElementById("modeSelect").addEventListener("change", (e) => {
-      const m = e.target.value;
-      setAutoRefresh(m === "mt5_paper" || m === "mt5");
-      loadState(false);
-    });
+    document.getElementById("symbolSelect").addEventListener("change", () => { lastTmKey = ""; loadState(false); });
+    document.getElementById("modeSelect").addEventListener("change", () => { lastTmKey = ""; loadState(false); });
     ["sideSelect", "entryInput", "stopSelect", "targetSelect"].forEach(id =>
-      document.getElementById(id).addEventListener("change", refreshPlan)
+      document.getElementById(id).addEventListener("change", async () => {
+        await refreshPlan();
+        if (id !== "entryInput") { lastTmKey = ""; runTimeMachineNow(true); }
+      })
     );
 
     document.getElementById("btnAdvance").addEventListener("click", async () => {
@@ -725,45 +839,7 @@
       await loadState(false);
     });
 
-    document.getElementById("btnTimemachine").addEventListener("click", async () => {
-      if (!currentPlan) return;
-      const btn = document.getElementById("btnTimemachine");
-      btn.disabled = true;
-      btn.textContent = "Simulando 10.000 pregões...";
-      const res = await api("/api/timemachine", {
-        method: "POST",
-        body: JSON.stringify({
-          symbol: currentPlan.symbol,
-          mode: document.getElementById("modeSelect").value,
-          plan: currentPlan,
-          replays: 10000,
-        }),
-      });
-      btn.disabled = false;
-      btn.textContent = "Rodar Time Machine";
-      if (!res.ok) {
-        document.getElementById("tmContent").textContent = "Erro: " + res.error;
-        return;
-      }
-      const tm = res.timemachine;
-      document.getElementById("tmContent").innerHTML = `
-        <div class="odds-bar">
-          <div class="odds-target" style="width:${tm.target_first_pct}%"></div>
-          <div class="odds-stop" style="width:${tm.stop_first_pct}%"></div>
-          <div class="odds-open" style="width:${tm.open_at_flat_by_pct}%"></div>
-        </div>
-        <div style="display:flex; justify-content:space-between; font-size:0.84rem; margin-bottom:8px;" class="mono">
-          <span class="text-green">Alvo primeiro: ${tm.target_first_pct}%</span>
-          <span class="text-red">Stop primeiro: ${tm.stop_first_pct}%</span>
-          <span class="text-amber">Aberto ${tm.flat_by_brt}: ${tm.open_at_flat_by_pct}%</span>
-        </div>
-        <div style="font-size:0.86rem;">
-          <strong>R médio:</strong> <span class="mono">${tm.avg_r >= 0 ? "+" : ""}${tm.avg_r}R</span>
-          (${fmtBRL(tm.expected_per_unit_brl)} / contrato) | <strong>Pregões:</strong> ${tm.pool_sessions}<br/>
-          <strong>Veredito:</strong> ${tm.verdict}
-        </div>
-      `;
-    });
+    document.getElementById("btnTimemachine").addEventListener("click", () => runTimeMachineNow(false));
 
     // Order confirmation modal
     document.getElementById("btnSendOrder").addEventListener("click", () => {
@@ -845,7 +921,16 @@
     });
 
     window.addEventListener("resize", drawChart);
-    loadState(false);
+    (async function boot() {
+      await loadState(false);
+      // Always-on 2s live loop while platform is open
+      setInterval(() => {
+        const m = document.getElementById("modeSelect").value;
+        if (m === "mt5_paper" || m === "mt5") {
+          loadState(true);
+        }
+      }, 2000);
+    })();
   </script>
 </body>
 </html>

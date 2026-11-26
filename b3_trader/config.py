@@ -38,6 +38,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "blocked_tickers": [],
     "data_provider": "auto",  # auto | mt5 | csv | yahoo | brapi
     "brapi_token": "",
+    "autopilot_enabled": False,
+    "dynamic_atr_stop": True,
+    "breakeven_at_1r": True,
+    "autopilot_min_avg_r": 0.0,
+    "allow_live_autopilot": False,
 }
 
 

@@ -324,6 +324,44 @@ class TestWebDashboardAndExecutor(unittest.TestCase):
             self.assertEqual(closed[0]["status"], "FECHADO (TAKE-PROFIT)")
             self.assertEqual(closed[0]["pnl_brl"], 80.0)
 
+    def test_autopilot_dynamic_atr_and_breakeven_1r(self) -> None:
+        from b3_trader.autopilot import analyze_intraday_context, apply_breakeven_1r
+        from b3_trader.mt5_executor import BrokerBridge
+
+        bars, last_day = _make_synthetic_sessions(170000.0, tick=5.0, n_days=15, final_day_breakout="buy")
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / "config.json"
+            state_path = Path(td) / "broker.json"
+            cfg = dict(DEFAULT_CONFIG)
+            cfg["account_equity_brl"] = 1000.0
+            cfg["max_loss_per_trade_brl"] = 50.0
+            cfg["daily_loss_limit_brl"] = 100.0
+            cfg["min_rr"] = 2.0
+            save_json(cfg_path, cfg)
+
+            ctx = analyze_intraday_context("WINFUT", bars, now_brt(f"{last_day.isoformat()} 10:30"), cfg)
+            self.assertIn(ctx["trend"], ("ALTA", "BAIXA", "LATERAL"))
+            self.assertGreaterEqual(ctx["dynamic_stop_pts"], 100.0)
+            self.assertLessEqual(ctx["dynamic_stop_pts"], 250.0)  # Bounded by R$ 50 risk (250 pts * R$0.20)
+
+            bridge = BrokerBridge(config_path=cfg_path, state_path=state_path)
+            order = {
+                "symbol": "WINFUT",
+                "side": "buy",
+                "qty": 1,
+                "entry_price": 170000.0,
+                "stop_loss_price": 169800.0,  # 200 pts risk (1R)
+                "take_profit_price": 170400.0,
+                "reduce_only": False,
+            }
+            res = bridge.execute_order(order, mode="mt5_paper", confirmed=True, now_override=f"{last_day.isoformat()} 10:30")
+            self.assertTrue(res["ok"])
+
+            # Price advances +200 pts (1R) -> Breakeven moves stop to 170000.0
+            be = apply_breakeven_1r(bridge, "WINFUT", last_price=170200.0, enabled=True)
+            self.assertIsNotNone(be)
+            self.assertEqual(be["new_stop"], 170000.0)
+
 
 if __name__ == "__main__":
     unittest.main()

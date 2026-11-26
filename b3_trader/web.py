@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
+from .autopilot import analyze_intraday_context, run_autopilot_step
 from .budget import size_position
 from .calendar_b3 import market_status, now_brt
 from .config import load_config, save_json
@@ -63,6 +64,16 @@ class B3DashboardApp:
             now_override=eff_now,
             config_path=self.config_path,
         )
+        context = analyze_intraday_context(spec.symbol, bars=bars, dt_now=dt_now, cfg=cfg)
+        autopilot = run_autopilot_step(
+            bridge=self.bridge,
+            symbol=spec.symbol,
+            mode=mode,
+            bars=bars,
+            dt_now=dt_now,
+            cfg=cfg,
+            context=context,
+        )
         acct = self.bridge.get_account_summary(mode=mode)
         chart_bars = [
             {
@@ -90,6 +101,8 @@ class B3DashboardApp:
             "effective_now_brt": eff_now,
             "market": mkt,
             "entry": entry,
+            "context": context,
+            "autopilot": autopilot,
             "account": acct,
             "config": cfg,
             "chart_bars": chart_bars,
@@ -105,6 +118,12 @@ class B3DashboardApp:
         target_rule = str(payload.get("target_rule", "2R"))
         now_override = payload.get("now_override")
 
+        cfg = load_config(self.config_path)
+        if stop_rule == "auto_atr":
+            bars = self.bridge.get_bars(symbol, mode=mode)
+            ctx = analyze_intraday_context(symbol, bars=bars, dt_now=now_brt(now_override), cfg=cfg)
+            stop_rule = f"points:{ctx['dynamic_stop_pts']}"
+
         plan = build_plan(
             symbol=symbol,
             side=side,
@@ -114,7 +133,6 @@ class B3DashboardApp:
             config_path=self.config_path,
         )
         budget = size_position(plan, config_path=self.config_path)
-        cfg = load_config(self.config_path)
         acct = self.bridge.get_account_summary(mode=mode)
 
         verdict = None
@@ -163,6 +181,10 @@ class B3DashboardApp:
             "max_trades_per_day",
             "min_rr",
             "paper",
+            "autopilot_enabled",
+            "dynamic_atr_stop",
+            "breakeven_at_1r",
+            "autopilot_min_avg_r",
         ):
             if key in payload:
                 cfg[key] = payload[key]

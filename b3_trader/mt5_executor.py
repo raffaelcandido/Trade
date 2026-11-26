@@ -293,17 +293,28 @@ class BrokerBridge:
         closed_events = self.sync_positions_with_bar(spec.symbol, new_bar)
         return {"bar": _bar_to_dict(new_bar), "closed_events": closed_events}
 
+    def effective_daily_risk_brl(self, st: Optional[Dict[str, Any]] = None) -> float:
+        """Net daily loss realized today + current stop-loss risk of still-open positions."""
+        data = st if st is not None else self._load_state()
+        realized_loss = max(0.0, -float(data.get("realized_pnl_brl", 0.0)))
+        open_risk = 0.0
+        for pos in data.get("positions", []):
+            spec = get_instrument(pos["symbol"])
+            r = max(0.0, spec.risk_per_unit_brl(float(pos["entry_price"]), float(pos["stop_loss_price"]), pos["side"]))
+            open_risk += r * int(pos["qty"])
+        return round(realized_loss + open_risk, 2)
+
     def get_account_summary(self, mode: str = "sim") -> Dict[str, Any]:
         cfg = load_config(self.config_path)
         st = self._load_state()
         conn = self.connection_info(mode)
         daily_limit = float(cfg["daily_loss_limit_brl"])
-        used_risk = float(st["used_daily_risk_brl"])
+        used_risk = self.effective_daily_risk_brl(st)
         return {
             "connection": conn,
             "trades_today": int(st["trades_today"]),
             "max_trades_per_day": int(cfg["max_trades_per_day"]),
-            "used_daily_risk_brl": round(used_risk, 2),
+            "used_daily_risk_brl": used_risk,
             "daily_loss_limit_brl": daily_limit,
             "remaining_daily_risk_brl": round(max(0.0, daily_limit - used_risk), 2),
             "realized_pnl_brl": round(float(st["realized_pnl_brl"]), 2),
@@ -330,7 +341,7 @@ class BrokerBridge:
             order,
             cfg=cfg,
             dt_now=dt_now,
-            used_daily_risk_brl=float(st["used_daily_risk_brl"]),
+            used_daily_risk_brl=self.effective_daily_risk_brl(st),
             trades_today=int(st["trades_today"]),
         )
         if verdict["verdict"] != "PASS":

@@ -331,7 +331,7 @@ def run_autopilot_step(
         order,
         cfg=cfg,
         dt_now=dt_now,
-        used_daily_risk_brl=float(st["used_daily_risk_brl"]),
+        used_daily_risk_brl=bridge.effective_daily_risk_brl(st),
         trades_today=int(st["trades_today"]),
     )
     if verdict["verdict"] != "PASS":

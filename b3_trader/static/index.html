@@ -194,15 +194,45 @@
 
     <!-- Main 2-column grid -->
     <section class="main-grid">
-      <!-- Left: Chart + Time Machine -->
+      <!-- Left: Live Trade Card + Chart + Time Machine -->
       <div style="display:flex; flex-direction:column; gap:16px;">
+        <div class="card" id="livePositionCard" style="display:none; border-width:2px;">
+          <div class="card-header" style="margin-bottom:8px;">
+            <div>
+              <div class="card-title" id="livePosTitle">OPERAÇÃO EM ANDAMENTO AO VIVO</div>
+              <div class="kpi-sub" id="livePosSub">--</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div style="text-align:right;">
+                <div class="mono" id="livePosPnl" style="font-size:1.45rem; font-weight:800;">R$ 0,00</div>
+                <div class="mono" id="livePosPts" style="font-size:0.85rem; font-weight:700;">0 pts</div>
+              </div>
+              <button id="btnQuickFlatten" class="btn-red">Zerar Agora</button>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:0.78rem; margin-bottom:4px;" class="mono">
+            <span class="text-red" id="livePosSlLabel">STOP: --</span>
+            <span class="text-amber" id="livePosEntryLabel">ENTRADA: --</span>
+            <span class="text-green" id="livePosTpLabel">ALVO: --</span>
+          </div>
+          <div style="position:relative; height:12px; border-radius:999px; background:linear-gradient(90deg, rgba(239,68,68,0.35), rgba(245,158,11,0.35) 33%, rgba(16,185,129,0.35)); border:1px solid var(--border); overflow:hidden;">
+            <div id="livePosMarker" style="position:absolute; top:0; bottom:0; width:6px; border-radius:999px; background:#fff; box-shadow:0 0 8px #fff; left:33%; transition:left 0.3s ease;"></div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-header">
             <div>
               <div class="card-title" id="chartTitle">WINFUT — Candles 5m (Horário de Brasília)</div>
-              <div class="kpi-sub" id="chartSubtitle">Range de abertura (15m) + níveis de entrada, stop e alvo 2:1</div>
+              <div class="kpi-sub" id="chartSubtitle">Linhas de Entrada/Stop/Alvo aparecem quando houver operação aberta</div>
             </div>
-            <div class="mono" style="font-size:1.25rem; font-weight:700;" id="lastPrice">--</div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.78rem; color:var(--muted); cursor:pointer;">
+                <input type="checkbox" id="chkPreviewLines" style="width:auto; padding:0;" />
+                Prévia Stop/Alvo
+              </label>
+              <div class="mono" style="font-size:1.25rem; font-weight:700;" id="lastPrice">--</div>
+            </div>
           </div>
           <div class="chart-wrap">
             <canvas id="candleCanvas"></canvas>
@@ -381,7 +411,12 @@
 
       let minP = Math.min(...bars.map(b => b.l));
       let maxP = Math.max(...bars.map(b => b.h));
-      if (currentPlan) {
+      const openPos = (appState.account?.positions || []).find(p => p.canonical === appState.canonical);
+      const showPreview = document.getElementById("chkPreviewLines")?.checked;
+      if (openPos) {
+        minP = Math.min(minP, openPos.stop_loss_price, openPos.take_profit_price);
+        maxP = Math.max(maxP, openPos.stop_loss_price, openPos.take_profit_price);
+      } else if (showPreview && currentPlan) {
         minP = Math.min(minP, currentPlan.stop_price, currentPlan.target_price);
         maxP = Math.max(maxP, currentPlan.stop_price, currentPlan.target_price);
       }
@@ -444,10 +479,14 @@
         }
       });
 
-      if (currentPlan) {
-        drawLevel(currentPlan.entry_price, "#f59e0b", "ENTRADA");
-        drawLevel(currentPlan.stop_price, "#ef4444", "STOP");
-        drawLevel(currentPlan.target_price, "#10b981", "ALVO");
+      if (openPos) {
+        drawLevel(openPos.entry_price, "#f59e0b", "ENTRADA ABERTA");
+        drawLevel(openPos.stop_loss_price, "#ef4444", "STOP-LOSS");
+        drawLevel(openPos.take_profit_price, "#10b981", "ALVO (GAIN)");
+      } else if (showPreview && currentPlan) {
+        drawLevel(currentPlan.entry_price, "#f59e0b", "PRÉVIA ENTRADA");
+        drawLevel(currentPlan.stop_price, "#ef4444", "PRÉVIA STOP");
+        drawLevel(currentPlan.target_price, "#10b981", "PRÉVIA ALVO");
       }
     }
 
@@ -550,6 +589,18 @@
       document.getElementById("lastPrice").textContent = data.last_price;
       document.getElementById("rrBadge").textContent = `Mínimo ${data.config.min_rr}:1`;
 
+      // Notify if a live position just hit Stop-Loss or Take-Profit
+      if (data.closed_events && data.closed_events.length) {
+        const ev = data.closed_events[0];
+        showToast(`${ev.status}: ${fmtBRL(ev.pnl_brl)}`, ev.pnl_brl >= 0 ? "var(--green)" : "var(--red)");
+      }
+
+      // Auto-sync entry price to live market price unless user is currently typing in entryInput
+      const entryEl = document.getElementById("entryInput");
+      if (document.activeElement !== entryEl) {
+        entryEl.value = data.last_price;
+      }
+
       // Signal banner
       const sig = data.entry || {};
       const sb = document.getElementById("signalBanner");
@@ -559,25 +610,58 @@
         sb.innerHTML = `<span><strong>SINAL ORB 15m: ${isBuy ? "COMPRA" : "VENDA"}</strong> @ ${sig.entry_price} (${sig.entry_time_brt} BRT)</span><span>Range: ${sig.or_low}–${sig.or_high}</span>`;
         if (!preserveEntry) {
           document.getElementById("sideSelect").value = sig.side;
-          document.getElementById("entryInput").value = data.last_price;
         }
       } else {
         sb.className = "signal-box pill-amber";
         sb.innerHTML = `<span><strong>${(sig.status || "INFO").toUpperCase()}:</strong> ${sig.reason || ""}</span>`;
-        if (!preserveEntry) {
-          document.getElementById("entryInput").value = data.last_price;
-        }
       }
 
-      // Open positions
+      // Live Active Position Highlight Card (above chart)
+      const activePos = (acct.positions || []).find(p => p.canonical === data.canonical);
+      const liveCard = document.getElementById("livePositionCard");
+      if (activePos) {
+        liveCard.style.display = "block";
+        const pnl = Number(activePos.floating_pnl_brl || 0);
+        const pts = Number(activePos.floating_pts || 0);
+        const isPos = pnl >= 0;
+        liveCard.style.borderColor = isPos ? "var(--green)" : "var(--red)";
+        liveCard.style.background = isPos ? "rgba(16, 185, 129, 0.08)" : "rgba(239, 68, 68, 0.08)";
+        const lado = activePos.side === "buy" ? "COMPRA" : "VENDA";
+        document.getElementById("livePosTitle").textContent = `OPERAÇÃO ABERTA AO VIVO — ${lado} ${activePos.qty} ${activePos.symbol}`;
+        document.getElementById("livePosSub").textContent = `Entrada ${activePos.entry_price} | Atual ${data.last_price} | Aberta às ${activePos.opened_at_brt}`;
+        const pnlLiveEl = document.getElementById("livePosPnl");
+        pnlLiveEl.textContent = `${pnl >= 0 ? "+" : ""}${fmtBRL(pnl)}`;
+        pnlLiveEl.className = `mono ${isPos ? "text-green" : "text-red"}`;
+        const ptsLiveEl = document.getElementById("livePosPts");
+        ptsLiveEl.textContent = `${pts >= 0 ? "+" : ""}${pts} pts (${isPos ? "A FAVOR" : "CONTRA"})`;
+        ptsLiveEl.className = `mono ${isPos ? "text-green" : "text-red"}`;
+        document.getElementById("livePosSlLabel").textContent = `STOP: ${activePos.stop_loss_price}`;
+        document.getElementById("livePosEntryLabel").textContent = `ENTRADA: ${activePos.entry_price}`;
+        document.getElementById("livePosTpLabel").textContent = `ALVO: ${activePos.take_profit_price}`;
+
+        // Position marker along Stop (0%) -> Target (100%)
+        const sl = Number(activePos.stop_loss_price);
+        const tp = Number(activePos.take_profit_price);
+        const pct = activePos.side === "buy"
+          ? ((data.last_price - sl) / Math.max(1e-6, tp - sl)) * 100
+          : ((sl - data.last_price) / Math.max(1e-6, sl - tp)) * 100;
+        document.getElementById("livePosMarker").style.left = `${Math.max(2, Math.min(98, pct))}%`;
+      } else {
+        liveCard.style.display = "none";
+      }
+
+      // Open positions list
       const posWrap = document.getElementById("positionsWrap");
       if (acct.positions && acct.positions.length) {
-        posWrap.innerHTML = acct.positions.map(p => `
-          <div class="signal-box pill-blue" style="margin-bottom:6px;">
+        posWrap.innerHTML = acct.positions.map(p => {
+          const pnl = Number(p.floating_pnl_brl || 0);
+          const pts = Number(p.floating_pts || 0);
+          return `
+          <div class="signal-box ${pnl >= 0 ? 'pill-green' : 'pill-red'}" style="margin-bottom:6px;">
             <span><strong>ABERTA:</strong> ${p.side.toUpperCase()} ${p.qty} ${p.symbol} @ ${p.entry_price} (SL ${p.stop_loss_price} / TP ${p.take_profit_price})</span>
-            <span class="mono ${p.floating_pnl_brl >= 0 ? 'text-green' : 'text-red'}">${fmtBRL(p.floating_pnl_brl)}</span>
-          </div>
-        `).join("");
+            <span class="mono" style="font-weight:800;">${pts >= 0 ? '+' : ''}${pts} pts | ${pnl >= 0 ? '+' : ''}${fmtBRL(pnl)}</span>
+          </div>`;
+        }).join("");
       } else {
         posWrap.innerHTML = `<div class="kpi-sub">Nenhuma posição aberta no momento.</div>`;
       }
@@ -608,15 +692,17 @@
       const btn = document.getElementById("btnAutoRefresh");
       if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
       if (enabled) {
-        btn.textContent = "Auto 5s: ON";
+        btn.textContent = "Auto 2s: ON";
         btn.className = "btn-green";
-        autoTimer = setInterval(() => loadState(true), 5000);
+        autoTimer = setInterval(() => loadState(true), 2000);
       } else {
-        btn.textContent = "Auto 5s: OFF";
+        btn.textContent = "Auto 2s: OFF";
         btn.className = "";
       }
     }
     document.getElementById("btnAutoRefresh").addEventListener("click", () => setAutoRefresh(!autoTimer));
+    document.getElementById("chkPreviewLines").addEventListener("change", drawChart);
+    document.getElementById("btnQuickFlatten").addEventListener("click", () => document.getElementById("btnFlatten").click());
 
     // Event listeners
     document.getElementById("symbolSelect").addEventListener("change", () => loadState(false));

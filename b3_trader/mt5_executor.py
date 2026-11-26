@@ -220,6 +220,7 @@ class BrokerBridge:
         if not st.get("positions"):
             return []
 
+        bar_key = bar.timestamp.strftime("%Y-%m-%d %H:%M")
         remaining = []
         closed_events = []
         for pos in st.get("positions", []):
@@ -229,8 +230,14 @@ class BrokerBridge:
             sl = float(pos["stop_loss_price"])
             tp = float(pos["take_profit_price"])
             side = pos["side"]
-            hit_sl = (bar.low <= sl) if side == "buy" else (bar.high >= sl)
-            hit_tp = (bar.high >= tp) if side == "buy" else (bar.low <= tp)
+            # On the same 5m candle where the position was just opened, only check the live close
+            # (earlier wicks from before the entry click must not trigger SL/TP retroactively)
+            opened_bar = pos.get("opened_bar_key")
+            check_low = bar.close if (opened_bar and opened_bar == bar_key) else bar.low
+            check_high = bar.close if (opened_bar and opened_bar == bar_key) else bar.high
+
+            hit_sl = (check_low <= sl) if side == "buy" else (check_high >= sl)
+            hit_tp = (check_high >= tp) if side == "buy" else (check_low <= tp)
             if hit_sl or hit_tp:
                 exit_px = sl if hit_sl else tp
                 reason = "STOP-LOSS" if hit_sl else "TAKE-PROFIT"
@@ -238,7 +245,7 @@ class BrokerBridge:
                 st["realized_pnl_brl"] = round(float(st["realized_pnl_brl"]) + pnl, 2)
                 evt = {
                     "id": str(uuid.uuid4())[:8],
-                    "time_brt": bar.timestamp.strftime("%Y-%m-%d %H:%M BRT"),
+                    "time_brt": now_brt().strftime("%Y-%m-%d %H:%M:%S BRT"),
                     "symbol": pos["symbol"],
                     "side": "sell" if side == "buy" else "buy",
                     "qty": pos["qty"],
@@ -249,8 +256,11 @@ class BrokerBridge:
                 st.setdefault("orders_log", []).insert(0, evt)
                 closed_events.append(evt)
             else:
+                entry_px = float(pos["entry_price"])
+                pts = round((bar.close - entry_px) if side == "buy" else (entry_px - bar.close), 2)
                 pos["last_price"] = bar.close
-                pos["floating_pnl_brl"] = spec.pnl_brl(float(pos["entry_price"]), bar.close, int(pos["qty"]), side)
+                pos["floating_pts"] = pts
+                pos["floating_pnl_brl"] = spec.pnl_brl(entry_px, bar.close, int(pos["qty"]), side)
                 remaining.append(pos)
 
         st["positions"] = remaining
@@ -387,6 +397,8 @@ class BrokerBridge:
 
         st["trades_today"] = int(st["trades_today"]) + 1
         st["used_daily_risk_brl"] = round(float(st["used_daily_risk_brl"]) + max_loss_brl, 2)
+        bar_min = (dt_now.minute // 5) * 5
+        opened_bar_key = dt_now.replace(minute=bar_min, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
         pos = {
             "id": broker_id,
             "symbol": spec.symbol,
@@ -398,7 +410,9 @@ class BrokerBridge:
             "stop_loss_price": sl,
             "take_profit_price": tp,
             "max_loss_brl": max_loss_brl,
+            "floating_pts": 0.0,
             "floating_pnl_brl": 0.0,
+            "opened_bar_key": opened_bar_key,
             "opened_at_brt": dt_now.strftime("%Y-%m-%d %H:%M:%S BRT"),
         }
         st.setdefault("positions", []).append(pos)

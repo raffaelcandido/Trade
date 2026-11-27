@@ -18,6 +18,7 @@ from .entry import evaluate_entry
 from .exit_plan import build_plan
 from .instruments import get_instrument
 from .mt5_executor import BrokerBridge
+from .news_calendar import add_custom_event, check_news_blackout
 from .risk import check_order
 from .timemachine import run_timemachine
 
@@ -65,6 +66,13 @@ class B3DashboardApp:
             config_path=self.config_path,
         )
         context = analyze_intraday_context(spec.symbol, bars=bars, dt_now=dt_now, cfg=cfg)
+        news_status = check_news_blackout(
+            dt_now=dt_now,
+            before_minutes=int(cfg.get("news_blackout_before_min", 15)),
+            after_minutes=int(cfg.get("news_blackout_after_min", 15)),
+            enabled=bool(cfg.get("news_blackout_enabled", True)),
+            events_override=[] if mode == "sim" else None,
+        )
         autopilot = run_autopilot_step(
             bridge=self.bridge,
             symbol=spec.symbol,
@@ -73,6 +81,7 @@ class B3DashboardApp:
             dt_now=dt_now,
             cfg=cfg,
             context=context,
+            news_status=news_status,
         )
         acct = self.bridge.get_account_summary(mode=mode)
         chart_bars = [
@@ -102,6 +111,7 @@ class B3DashboardApp:
             "market": mkt,
             "entry": entry,
             "context": context,
+            "news": news_status,
             "autopilot": autopilot,
             "account": acct,
             "config": cfg,
@@ -185,6 +195,10 @@ class B3DashboardApp:
             "dynamic_atr_stop",
             "breakeven_at_1r",
             "autopilot_min_avg_r",
+            "news_blackout_enabled",
+            "adx_filter_enabled",
+            "mtf_m15_filter_enabled",
+            "rvol_filter_enabled",
         ):
             if key in payload:
                 cfg[key] = payload[key]
@@ -252,6 +266,14 @@ def make_handler(app: B3DashboardApp) -> type[BaseHTTPRequestHandler]:
                     self._send_json(app.flatten(payload))
                 elif parsed.path == "/api/config":
                     self._send_json(app.update_config(payload))
+                elif parsed.path == "/api/news/custom":
+                    ev = add_custom_event(
+                        title=str(payload["title"]),
+                        date_str=str(payload["date"]),
+                        time_brt=str(payload["time_brt"]),
+                        country=str(payload.get("country", "BRL")),
+                    )
+                    self._send_json({"ok": True, "event": ev})
                 elif parsed.path == "/api/sim/tick":
                     sym = str(payload.get("symbol", "WINFUT"))
                     self._send_json({"ok": True, **app.bridge.advance_sim_bar(sym)})

@@ -50,6 +50,88 @@ def calc_vwap(day_bars: List[Bar]) -> List[float]:
     return out
 
 
+def calc_adx(bars: List[Bar], period: int = 14) -> float:
+    """Compute Wilder's ADX(14) trend-strength indicator (pure stdlib)."""
+    if len(bars) < period + 2:
+        return 0.0
+    trs: List[float] = []
+    plus_dms: List[float] = []
+    minus_dms: List[float] = []
+    for i in range(1, len(bars)):
+        cur, prev = bars[i], bars[i - 1]
+        up_move = cur.high - prev.high
+        down_move = prev.low - cur.low
+        plus_dm = up_move if (up_move > down_move and up_move > 0) else 0.0
+        minus_dm = down_move if (down_move > up_move and down_move > 0) else 0.0
+        tr = max(cur.high - cur.low, abs(cur.high - prev.close), abs(cur.low - prev.close))
+        trs.append(tr)
+        plus_dms.append(plus_dm)
+        minus_dms.append(minus_dm)
+
+    if len(trs) < period:
+        return 0.0
+
+    # Wilder smoothing
+    sm_tr = sum(trs[:period])
+    sm_pdm = sum(plus_dms[:period])
+    sm_mdm = sum(minus_dms[:period])
+    dxs: List[float] = []
+
+    for i in range(period, len(trs)):
+        sm_tr = sm_tr - (sm_tr / period) + trs[i]
+        sm_pdm = sm_pdm - (sm_pdm / period) + plus_dms[i]
+        sm_mdm = sm_mdm - (sm_mdm / period) + minus_dms[i]
+        if sm_tr <= 0:
+            continue
+        pdi = 100.0 * (sm_pdm / sm_tr)
+        mdi = 100.0 * (sm_mdm / sm_tr)
+        denom = pdi + mdi
+        if denom > 0:
+            dxs.append(100.0 * abs(pdi - mdi) / denom)
+
+    if not dxs:
+        return 0.0
+    adx = sum(dxs[:period]) / min(period, len(dxs))
+    for dx in dxs[period:]:
+        adx = ((adx * (period - 1)) + dx) / period
+    return round(adx, 2)
+
+
+def analyze_m15_trend(bars: List[Bar]) -> str:
+    """Aggregate 5m bars into 15-minute candles and classify M15 trend (ALTA/BAIXA/LATERAL)."""
+    if len(bars) < 30:
+        return "LATERAL"
+    buckets: Dict[Tuple[int, int, int, int, int], List[Bar]] = {}
+    for b in bars[-180:]:
+        slot_min = (b.timestamp.minute // 15) * 15
+        key = (b.timestamp.year, b.timestamp.month, b.timestamp.day, b.timestamp.hour, slot_min)
+        buckets.setdefault(key, []).append(b)
+    m15_closes = [grp[-1].close for _, grp in sorted(buckets.items())]
+    if len(m15_closes) < 10:
+        return "LATERAL"
+    ema9 = calc_ema(m15_closes, 9)[-1]
+    ema21 = calc_ema(m15_closes, 21)[-1]
+    last_c = m15_closes[-1]
+    if ema9 > ema21 and last_c >= ema9:
+        return "ALTA"
+    if ema9 < ema21 and last_c <= ema9:
+        return "BAIXA"
+    return "LATERAL"
+
+
+def calc_rvol(bars: List[Bar], period: int = 20) -> float:
+    """Compute relative volume of the latest completed candle vs 20-bar average."""
+    if len(bars) < 5:
+        return 1.0
+    completed = bars[:-1] if len(bars) >= 6 else bars
+    last_vol = completed[-1].volume
+    window = [b.volume for b in completed[-(period + 1):-1] if b.volume > 0]
+    if not window or last_vol <= 0:
+        return 1.0
+    avg_vol = sum(window) / len(window)
+    return round(last_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+
+
 def choose_dynamic_stop_pts(
     spec: InstrumentSpec,
     bars: List[Bar],
@@ -73,7 +155,7 @@ def analyze_intraday_context(
     dt_now: datetime,
     cfg: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Compute live indicators (EMA9, EMA21, VWAP, ATR14) and detect fresh intraday signals."""
+    """Compute live indicators (EMA9, EMA21, VWAP, ATR14, ADX14, M15, RVOL) and fresh signals."""
     spec = get_instrument(symbol)
     today = dt_now.date()
     day_bars = [b for b in bars if b.timestamp.date() == today]
@@ -84,6 +166,9 @@ def analyze_intraday_context(
     ema21_series = calc_ema(closes, 21)
     vwap_series = calc_vwap(day_bars) if day_bars else []
     atr14 = round(calc_atr(recent, 14), 2)
+    adx14 = calc_adx(bars[-90:] if len(bars) >= 90 else bars, 14)
+    m15_trend = analyze_m15_trend(bars)
+    rvol = calc_rvol(bars, 20)
     dyn_stop_pts = choose_dynamic_stop_pts(spec, recent, float(cfg["max_loss_per_trade_brl"]))
 
     ema9 = round(ema9_series[-1], 2) if ema9_series else 0.0
@@ -160,6 +245,9 @@ def analyze_intraday_context(
         "ema21": ema21,
         "vwap": vwap,
         "atr14": atr14,
+        "adx14": adx14,
+        "m15_trend": m15_trend,
+        "rvol": rvol,
         "dynamic_stop_pts": dyn_stop_pts,
         "signal": signal,
         "ema9_tail": [round(x, 2) for x in ema9_series[-45:]],
@@ -226,8 +314,9 @@ def run_autopilot_step(
     dt_now: datetime,
     cfg: Dict[str, Any],
     context: Dict[str, Any],
+    news_status: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Run one autonomous robot evaluation cycle (Breakeven, EOD flatten, or new entry)."""
+    """Run one autonomous robot evaluation cycle (Breakeven, EOD flatten, news/ADX/M15/RVOL filters, or new entry)."""
     spec = get_instrument(symbol)
     st = bridge._load_state()
     open_pos = [p for p in st.get("positions", []) if p["canonical"] == spec.canonical]
@@ -257,7 +346,7 @@ def run_autopilot_step(
         return {
             "active": False,
             "action": "idle",
-            "message": f"Robô em pausa. Tendência: {context['trend']} | ATR(14): {context['atr14']} pts (Stop sugerido: {context['dynamic_stop_pts']} pts).",
+            "message": f"Robô em pausa. Tendência M5: {context['trend']} | M15: {context['m15_trend']} | ADX: {context['adx14']} | Stop ATR: {context['dynamic_stop_pts']} pts.",
         }
 
     # 3. Safety gate for live real-money autopilot
@@ -268,7 +357,15 @@ def run_autopilot_step(
             "message": "Robô bloqueado em Conta REAL por segurança (use 'MT5 Ao Vivo + Paper Local' ou libere allow_live_autopilot no config.json).",
         }
 
-    # 4. Check trading day & entry window
+    # 4. News blackout filter (High Impact USD/BRL ±15m)
+    if news_status and news_status.get("blocked"):
+        return {
+            "active": True,
+            "action": "blocked_news",
+            "message": str(news_status.get("summary", "Blackout de notícia de alto impacto ativo.")),
+        }
+
+    # 5. Check trading day & entry window
     trading_day, reason = is_trading_day(dt_now.date())
     if not trading_day:
         return {"active": True, "action": "closed", "message": f"Robô aguardando pregão ({reason})."}
@@ -282,7 +379,33 @@ def run_autopilot_step(
         return {
             "active": True,
             "action": "scanning",
-            "message": f"Robô ativo monitorando {spec.symbol} — Tendência: {context['trend']} | ATR: {context['atr14']} pts. Aguardando sinal confirmado.",
+            "message": f"Robô ativo monitorando {spec.symbol} — M5: {context['trend']} | M15: {context['m15_trend']} | ADX: {context['adx14']} | RVOL: {context['rvol']}x. Aguardando sinal.",
+        }
+
+    # 6. Anti-chop professional filters: ADX(14), Multi-Timeframe M15, and RVOL
+    min_adx = float(cfg.get("min_adx", 20.0))
+    if cfg.get("adx_filter_enabled", True) and context["adx14"] < min_adx:
+        return {
+            "active": True,
+            "action": "filtered_adx",
+            "message": f"Sinal {sig['strategy']} ignorado: mercado lateral (ADX {context['adx14']:.1f} < {min_adx:.0f}).",
+        }
+
+    if cfg.get("mtf_m15_filter_enabled", True):
+        expected_m15 = "ALTA" if sig["side"] == "buy" else "BAIXA"
+        if context["m15_trend"] != expected_m15:
+            return {
+                "active": True,
+                "action": "filtered_m15",
+                "message": f"Sinal {sig['strategy']} ({sig['side'].upper()}) ignorado: M15 está em {context['m15_trend']} (precisa {expected_m15}).",
+            }
+
+    min_rvol = float(cfg.get("min_rvol", 1.2))
+    if cfg.get("rvol_filter_enabled", True) and context["rvol"] < min_rvol:
+        return {
+            "active": True,
+            "action": "filtered_rvol",
+            "message": f"Sinal {sig['strategy']} ignorado: volume fraco (RVOL {context['rvol']:.2f}x < {min_rvol:.1f}x).",
         }
 
     # Prevent duplicate entry on the same candle

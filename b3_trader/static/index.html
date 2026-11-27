@@ -193,20 +193,39 @@
     </section>
 
     <!-- Autopilot Control Bar -->
-    <section class="card" id="autopilotBar" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px;">
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-        <button id="btnToggleAutopilot" class="btn-amber">Robô Automático: DESLIGADO</button>
-        <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.82rem; cursor:pointer;">
-          <input type="checkbox" id="chkDynAtr" checked style="width:auto; padding:0;" />
-          Stop Dinâmico (ATR)
-        </label>
-        <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.82rem; cursor:pointer;">
-          <input type="checkbox" id="chkBreakeven" checked style="width:auto; padding:0;" />
-          Breakeven em 1R (0x0)
-        </label>
+    <section class="card" id="autopilotBar" style="display:flex; flex-direction:column; gap:8px; padding:12px 16px;">
+      <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <button id="btnToggleAutopilot" class="btn-amber">🤖 Robô Automático: DESLIGADO</button>
+          <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.8rem; cursor:pointer;">
+            <input type="checkbox" id="chkDynAtr" checked style="width:auto; padding:0;" />
+            Stop ATR
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.8rem; cursor:pointer;">
+            <input type="checkbox" id="chkBreakeven" checked style="width:auto; padding:0;" />
+            Breakeven 1R
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.8rem; cursor:pointer;">
+            <input type="checkbox" id="chkNewsFilter" checked style="width:auto; padding:0;" />
+            Notícias ±15m
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.8rem; cursor:pointer;">
+            <input type="checkbox" id="chkAdxFilter" checked style="width:auto; padding:0;" />
+            ADX &ge; 20
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.8rem; cursor:pointer;">
+            <input type="checkbox" id="chkM15Filter" checked style="width:auto; padding:0;" />
+            Confirma M15
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.8rem; cursor:pointer;">
+            <input type="checkbox" id="chkRvolFilter" checked style="width:auto; padding:0;" />
+            Volume &ge; 1.2x
+          </label>
+        </div>
+        <div id="newsPill" class="pill pill-green">Notícias: LIVRE</div>
       </div>
       <div style="font-size:0.82rem; color:var(--muted);" id="autopilotStatusText">
-        Analisando contexto intraday (EMA9 / EMA21 / VWAP / ATR)...
+        Analisando contexto intraday (EMA9 / EMA21 / VWAP / ATR / ADX / M15 / RVOL)...
       </div>
     </section>
 
@@ -266,6 +285,17 @@
             <button id="btnTimemachine" class="btn-primary">Rodar Time Machine</button>
           </div>
           <div id="tmContent" class="kpi-sub">Clique em "Rodar Time Machine" para simular 10.000 pregões para o plano atual.</div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Agenda Econômica — Notícias 3 Touros (USD / BRL)</div>
+              <div class="kpi-sub" id="newsSummaryText">Carregando calendário de alto impacto (blackout automático ±15 min)...</div>
+            </div>
+            <button id="btnAddNews" style="font-size:0.78rem;">+ Evento BR</button>
+          </div>
+          <div id="newsList" class="kpi-sub">Nenhum evento de alto impacto listado para hoje.</div>
         </div>
       </div>
 
@@ -727,14 +757,49 @@
       // Autopilot bar status & controls
       const ap = data.autopilot || {};
       const ctxInfo = data.context || {};
+      const news = data.news || {};
       const apBtn = document.getElementById("btnToggleAutopilot");
       const apEnabled = Boolean(data.config?.autopilot_enabled);
       apBtn.textContent = apEnabled ? "🤖 Robô Automático: LIGADO" : "🤖 Robô Automático: DESLIGADO";
       apBtn.className = apEnabled ? "btn-green" : "btn-amber";
       document.getElementById("chkDynAtr").checked = Boolean(data.config?.dynamic_atr_stop ?? true);
       document.getElementById("chkBreakeven").checked = Boolean(data.config?.breakeven_at_1r ?? true);
+      document.getElementById("chkNewsFilter").checked = Boolean(data.config?.news_blackout_enabled ?? true);
+      document.getElementById("chkAdxFilter").checked = Boolean(data.config?.adx_filter_enabled ?? true);
+      document.getElementById("chkM15Filter").checked = Boolean(data.config?.mtf_m15_filter_enabled ?? true);
+      document.getElementById("chkRvolFilter").checked = Boolean(data.config?.rvol_filter_enabled ?? true);
+
+      const newsPill = document.getElementById("newsPill");
+      if (news.blocked) {
+        newsPill.className = "pill pill-red";
+        newsPill.textContent = `🚨 BLACKOUT: ${news.active_event?.title || "NOTÍCIA"}`;
+      } else if (news.next_event) {
+        newsPill.className = "pill pill-amber";
+        newsPill.textContent = `Próx. 3 Touros: ${news.next_event.time_brt} (${news.next_event.country})`;
+      } else {
+        newsPill.className = "pill pill-green";
+        newsPill.textContent = "Notícias: LIVRE";
+      }
+
       document.getElementById("autopilotStatusText").innerHTML =
-        `<strong>Tendência:</strong> ${ctxInfo.trend || "--"} | <strong>VWAP:</strong> ${ctxInfo.vwap || "--"} | <strong>ATR(14):</strong> ${ctxInfo.atr14 || "--"} pts — ${ap.message || ""}`;
+        `<strong>M5:</strong> ${ctxInfo.trend || "--"} | <strong>M15:</strong> ${ctxInfo.m15_trend || "--"} | ` +
+        `<strong>ADX(14):</strong> ${ctxInfo.adx14 ?? "--"} | <strong>RVOL:</strong> ${ctxInfo.rvol ?? "--"}x | ` +
+        `<strong>VWAP:</strong> ${ctxInfo.vwap || "--"} | <strong>ATR:</strong> ${ctxInfo.atr14 || "--"} pts — ${ap.message || ""}`;
+
+      // News card rendering
+      document.getElementById("newsSummaryText").textContent = news.summary || "";
+      const nl = document.getElementById("newsList");
+      if (news.today_events && news.today_events.length) {
+        nl.innerHTML = news.today_events.map(ev => `
+          <div class="signal-box ${ev.in_blackout ? 'pill-red' : 'pill-amber'}" style="margin-bottom:6px; padding:7px 10px;">
+            <span><strong class="mono">${ev.time_brt} BRT</strong> [${ev.country}] ${ev.title}</span>
+            <span class="mono">${ev.in_blackout ? 'BLACKOUT ATIVO' : (ev.minutes_to_event > 0 ? 'em ' + Math.round(ev.minutes_to_event) + 'm' : 'passou')}</span>
+          </div>
+        `).join("");
+      } else {
+        nl.innerHTML = `<div class="kpi-sub">Nenhuma notícia 3 touros (USD/BRL) restante para hoje.</div>`;
+      }
+
       if (ap.action === "executed" || ap.action === "breakeven" || ap.action === "flattened_eod") {
         showToast(ap.message, "var(--green)");
       }
@@ -814,6 +879,31 @@
     document.getElementById("chkBreakeven").addEventListener("change", async (e) => {
       await api("/api/config", { method: "POST", body: JSON.stringify({ breakeven_at_1r: e.target.checked }) });
       showToast("Breakeven em 1R atualizado!", "var(--green)");
+      await loadState(true);
+    });
+    const bindFilter = (id, key, label) => {
+      document.getElementById(id).addEventListener("change", async (e) => {
+        await api("/api/config", { method: "POST", body: JSON.stringify({ [key]: e.target.checked }) });
+        showToast(`${label}: ${e.target.checked ? "LIGADO" : "DESLIGADO"}`, "var(--green)");
+        await loadState(true);
+      });
+    };
+    bindFilter("chkNewsFilter", "news_blackout_enabled", "Filtro de Notícias (±15m)");
+    bindFilter("chkAdxFilter", "adx_filter_enabled", "Filtro ADX >= 20");
+    bindFilter("chkM15Filter", "mtf_m15_filter_enabled", "Confirmação M15");
+    bindFilter("chkRvolFilter", "rvol_filter_enabled", "Filtro Volume RVOL");
+
+    document.getElementById("btnAddNews").addEventListener("click", async () => {
+      const title = prompt("Nome da notícia/evento BR (ex: COPOM Selic, IPCA, PIB Brasil):", "IPCA Brasil");
+      if (!title) return;
+      const timeBrt = prompt("Horário de Brasília (HH:MM, ex: 09:00 ou 18:30):", "09:00");
+      if (!timeBrt) return;
+      const today = (appState?.market?.now_brt || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+      await api("/api/news/custom", {
+        method: "POST",
+        body: JSON.stringify({ title, date: today, time_brt: timeBrt, country: "BRL" }),
+      });
+      showToast(`Evento '${title}' às ${timeBrt} BRT adicionado ao blackout!`, "var(--amber)");
       await loadState(true);
     });
     document.getElementById("chkPreviewLines").addEventListener("change", drawChart);

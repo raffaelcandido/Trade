@@ -43,6 +43,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "breakeven_at_1r": True,
     "autopilot_min_avg_r": 0.0,
     "allow_live_autopilot": False,
+    "news_blackout_enabled": True,
+    "news_blackout_before_min": 15,
+    "news_blackout_after_min": 15,
+    "adx_filter_enabled": True,
+    "min_adx": 20.0,
+    "mtf_m15_filter_enabled": True,
+    "rvol_filter_enabled": True,
+    "min_rvol": 1.2,
 }
 
 

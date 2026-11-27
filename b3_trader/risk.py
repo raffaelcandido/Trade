@@ -26,6 +26,7 @@ def check_order(
     dt_now: datetime,
     used_daily_risk_brl: float = 0.0,
     trades_today: int = 0,
+    ignore_daily_limits: bool = False,
 ) -> Dict[str, Any]:
     """Validate a single B3 order against all risk rules. Returns PASS or BLOCK."""
     reasons: List[str] = []
@@ -102,7 +103,7 @@ def check_order(
             reasons.append(
                 f"Perda no stop (R$ {max_loss_brl:.2f}) excede o limite por trade (R$ {cfg['max_loss_per_trade_brl']:.2f})."
             )
-        if used_daily_risk_brl + max_loss_brl > float(cfg["daily_loss_limit_brl"]) + 1e-6:
+        if not ignore_daily_limits and (used_daily_risk_brl + max_loss_brl > float(cfg["daily_loss_limit_brl"]) + 1e-6):
             reasons.append(
                 f"Risco acumulado do dia (R$ {used_daily_risk_brl + max_loss_brl:.2f}) "
                 f"excede o limite diário (R$ {cfg['daily_loss_limit_brl']:.2f})."
@@ -117,7 +118,7 @@ def check_order(
                 reasons.append(f"Relação Retorno:Risco ({rr:.2f}R) abaixo do mínimo ({cfg['min_rr']}R).")
 
     # 6. Max trades per day
-    if trades_today >= int(cfg["max_trades_per_day"]):
+    if not ignore_daily_limits and trades_today >= int(cfg["max_trades_per_day"]):
         reasons.append(f"Limite diário de trades atingido ({trades_today}/{cfg['max_trades_per_day']}).")
 
     # 7. Margin / capital check

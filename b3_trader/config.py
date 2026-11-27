@@ -55,6 +55,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "min_institutional_score": 70,
     "milhar_wall_filter_enabled": True,
     "flow_filter_enabled": True,
+    "paper_unlimited_daily": True,
 }
 
 

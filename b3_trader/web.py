@@ -179,6 +179,7 @@ class B3DashboardApp:
                 dt_now=now_brt(now_override),
                 used_daily_risk_brl=acct["used_daily_risk_brl"],
                 trades_today=acct["trades_today"],
+                ignore_daily_limits=(mode != "mt5" and bool(cfg.get("paper_unlimited_daily", True))),
             )
 
         return {"ok": True, "plan": plan, "budget": budget, "verdict": verdict}
@@ -224,6 +225,7 @@ class B3DashboardApp:
             "adx_filter_enabled",
             "mtf_m15_filter_enabled",
             "rvol_filter_enabled",
+            "paper_unlimited_daily",
         ):
             if key in payload:
                 cfg[key] = payload[key]

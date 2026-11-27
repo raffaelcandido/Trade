@@ -343,6 +343,7 @@ class BrokerBridge:
             dt_now=dt_now,
             used_daily_risk_brl=self.effective_daily_risk_brl(st),
             trades_today=int(st["trades_today"]),
+            ignore_daily_limits=(mode != "mt5" and bool(cfg.get("paper_unlimited_daily", True))),
         )
         if verdict["verdict"] != "PASS":
             return {

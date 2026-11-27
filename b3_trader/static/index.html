@@ -221,6 +221,10 @@
             <input type="checkbox" id="chkRvolFilter" checked style="width:auto; padding:0;" />
             Volume &ge; 1.2x
           </label>
+          <label style="display:inline-flex; align-items:center; gap:5px; font-size:0.8rem; cursor:pointer; color:var(--amber);" title="Ignora limite diário de perda e nº de trades APENAS no modo Paper/Simulador (na Conta Real continua 100% travado)">
+            <input type="checkbox" id="chkPaperUnlimited" checked style="width:auto; padding:0;" />
+            Paper Livre (sem limite diário)
+          </label>
         </div>
         <div id="newsPill" class="pill pill-green">Notícias: LIVRE</div>
       </div>
@@ -799,6 +803,7 @@
       document.getElementById("chkAdxFilter").checked = Boolean(data.config?.adx_filter_enabled ?? true);
       document.getElementById("chkM15Filter").checked = Boolean(data.config?.mtf_m15_filter_enabled ?? true);
       document.getElementById("chkRvolFilter").checked = Boolean(data.config?.rvol_filter_enabled ?? true);
+      document.getElementById("chkPaperUnlimited").checked = Boolean(data.config?.paper_unlimited_daily ?? true);
 
       const newsPill = document.getElementById("newsPill");
       if (news.blocked) {
@@ -953,6 +958,7 @@
     bindFilter("chkAdxFilter", "adx_filter_enabled", "Filtro ADX >= 20");
     bindFilter("chkM15Filter", "mtf_m15_filter_enabled", "Confirmação M15");
     bindFilter("chkRvolFilter", "rvol_filter_enabled", "Filtro Volume RVOL");
+    bindFilter("chkPaperUnlimited", "paper_unlimited_daily", "Paper Livre (sem limite diário)");
 
     document.getElementById("btnAddNews").addEventListener("click", async () => {
       const title = prompt("Nome da notícia/evento BR (ex: COPOM Selic, IPCA, PIB Brasil):", "IPCA Brasil");

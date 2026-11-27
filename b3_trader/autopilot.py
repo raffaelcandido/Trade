@@ -30,8 +30,12 @@ def calc_atr(bars: List[Bar], period: int = 14) -> float:
     trs: List[float] = []
     for i in range(1, len(bars)):
         b = bars[i]
-        prev_c = bars[i - 1].close
-        tr = max(b.high - b.low, abs(b.high - prev_c), abs(b.low - prev_c))
+        prev = bars[i - 1]
+        if b.timestamp.date() != prev.timestamp.date():
+            # Do not let overnight B3 gaps artificially inflate intraday ATR
+            tr = b.high - b.low
+        else:
+            tr = max(b.high - b.low, abs(b.high - prev.close), abs(b.low - prev.close))
         trs.append(tr)
     window = trs[-period:] if len(trs) >= period else trs
     return sum(window) / len(window)
@@ -51,7 +55,7 @@ def calc_vwap(day_bars: List[Bar]) -> List[float]:
 
 
 def calc_adx(bars: List[Bar], period: int = 14) -> float:
-    """Compute Wilder's ADX(14) trend-strength indicator (pure stdlib)."""
+    """Compute Wilder's ADX(14) trend-strength indicator ignoring overnight gaps."""
     if len(bars) < period + 2:
         return 0.0
     trs: List[float] = []
@@ -59,11 +63,17 @@ def calc_adx(bars: List[Bar], period: int = 14) -> float:
     minus_dms: List[float] = []
     for i in range(1, len(bars)):
         cur, prev = bars[i], bars[i - 1]
-        up_move = cur.high - prev.high
-        down_move = prev.low - cur.low
-        plus_dm = up_move if (up_move > down_move and up_move > 0) else 0.0
-        minus_dm = down_move if (down_move > up_move and down_move > 0) else 0.0
-        tr = max(cur.high - cur.low, abs(cur.high - prev.close), abs(cur.low - prev.close))
+        if cur.timestamp.date() != prev.timestamp.date():
+            # Ignore overnight B3 gap in directional movement and true range
+            tr = cur.high - cur.low
+            plus_dm = 0.0
+            minus_dm = 0.0
+        else:
+            up_move = cur.high - prev.high
+            down_move = prev.low - cur.low
+            plus_dm = up_move if (up_move > down_move and up_move > 0) else 0.0
+            minus_dm = down_move if (down_move > up_move and down_move > 0) else 0.0
+            tr = max(cur.high - cur.low, abs(cur.high - prev.close), abs(cur.low - prev.close))
         trs.append(tr)
         plus_dms.append(plus_dm)
         minus_dms.append(minus_dm)

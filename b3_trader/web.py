@@ -16,6 +16,12 @@ from .calendar_b3 import market_status, now_brt
 from .config import load_config, save_json
 from .entry import evaluate_entry
 from .exit_plan import build_plan
+from .institutional import (
+    analyze_channel_and_frequency,
+    analyze_milhar_levels,
+    compute_institutional_score,
+    fetch_mt5_order_flow,
+)
 from .instruments import get_instrument
 from .mt5_executor import BrokerBridge
 from .news_calendar import add_custom_event, check_news_blackout
@@ -66,6 +72,23 @@ class B3DashboardApp:
             config_path=self.config_path,
         )
         context = analyze_intraday_context(spec.symbol, bars=bars, dt_now=dt_now, cfg=cfg)
+        last_px = bars[-1].close if bars else 0.0
+        flow = (
+            fetch_mt5_order_flow(spec.symbol, lookback_minutes=5)
+            if mode in ("mt5_paper", "mt5")
+            else {"available": False, "flow_bias": "NEUTRO", "delta": 0.0, "delta_pct": 0.0, "big_buy_lots": 0, "big_sell_lots": 0, "book_imbalance_pct": 50.0, "note": "Modo Simulador Offline (fluxo real ativo no MT5)."}
+        )
+        milhar = analyze_milhar_levels(spec, last_px)
+        channel = analyze_channel_and_frequency(bars, window=24)
+        score_buy = compute_institutional_score("buy", context, flow, milhar, channel)
+        score_sell = compute_institutional_score("sell", context, flow, milhar, channel)
+        institutional = {
+            "flow": flow,
+            "milhar": milhar,
+            "channel": channel,
+            "score_buy": score_buy,
+            "score_sell": score_sell,
+        }
         news_status = check_news_blackout(
             dt_now=dt_now,
             before_minutes=int(cfg.get("news_blackout_before_min", 15)),
@@ -82,6 +105,7 @@ class B3DashboardApp:
             cfg=cfg,
             context=context,
             news_status=news_status,
+            institutional=institutional,
         )
         acct = self.bridge.get_account_summary(mode=mode)
         chart_bars = [
@@ -106,11 +130,12 @@ class B3DashboardApp:
             "point_value_brl": spec.point_value_brl,
             "tick_value_brl": spec.tick_value_brl,
             "lot_step": spec.lot_step,
-            "last_price": bars[-1].close if bars else 0.0,
+            "last_price": last_px,
             "effective_now_brt": eff_now,
             "market": mkt,
             "entry": entry,
             "context": context,
+            "institutional": institutional,
             "news": news_status,
             "autopilot": autopilot,
             "account": acct,

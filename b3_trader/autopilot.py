@@ -325,6 +325,7 @@ def run_autopilot_step(
     cfg: Dict[str, Any],
     context: Dict[str, Any],
     news_status: Optional[Dict[str, Any]] = None,
+    institutional: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run one autonomous robot evaluation cycle (Breakeven, EOD flatten, news/ADX/M15/RVOL filters, or new entry)."""
     spec = get_instrument(symbol)
@@ -417,6 +418,32 @@ def run_autopilot_step(
             "action": "filtered_rvol",
             "message": f"Sinal {sig['strategy']} ignorado: volume fraco (RVOL {context['rvol']:.2f}x < {min_rvol:.1f}x).",
         }
+
+    # 7. Institutional confluence filters: Milhar wall, live MT5 Order Flow, and Score >= 70
+    if institutional and cfg.get("institutional_filter_enabled", True):
+        side_score = institutional["score_buy"] if sig["side"] == "buy" else institutional["score_sell"]
+        flow = institutional.get("flow", {})
+        if cfg.get("milhar_wall_filter_enabled", True) and side_score.get("wall_blocked"):
+            return {
+                "active": True,
+                "action": "filtered_milhar",
+                "message": f"Sinal {sig['strategy']} ({sig['side'].upper()}) ignorado: colado em parede de Milhar ({institutional['milhar']['resistance_milhar'] if sig['side'] == 'buy' else institutional['milhar']['support_milhar']}).",
+            }
+        if cfg.get("flow_filter_enabled", True) and flow.get("available"):
+            opp_flow = "VENDEDOR" if sig["side"] == "buy" else "COMPRADOR"
+            if flow.get("flow_bias") == opp_flow:
+                return {
+                    "active": True,
+                    "action": "filtered_flow",
+                    "message": f"Sinal {sig['strategy']} ({sig['side'].upper()}) ignorado: fluxo institucional contrário ({opp_flow}, Delta {flow.get('delta_pct', 0):+.1f}%).",
+                }
+        min_score = int(cfg.get("min_institutional_score", 70))
+        if int(side_score.get("score", 0)) < min_score:
+            return {
+                "active": True,
+                "action": "filtered_score",
+                "message": f"Sinal {sig['strategy']} ({sig['side'].upper()}) ignorado: Score Institucional {side_score['score']}/100 abaixo do mínimo ({min_score}/100).",
+            }
 
     # Prevent duplicate entry on the same candle
     sig_key = f"{spec.canonical}:{sig['bar_time']}:{sig['side']}"

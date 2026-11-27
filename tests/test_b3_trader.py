@@ -406,6 +406,31 @@ class TestWebDashboardAndExecutor(unittest.TestCase):
             )
             self.assertEqual(res["action"], "blocked_news")
 
+    def test_institutional_milhar_channel_and_score(self) -> None:
+        from b3_trader.institutional import (
+            analyze_channel_and_frequency,
+            analyze_milhar_levels,
+            compute_institutional_score,
+        )
+
+        win = get_instrument("WINFUT")
+        # 184950 is only 50 pts below 185000 resistance -> buy wall blocked!
+        ml = analyze_milhar_levels(win, 184950.0)
+        self.assertEqual(ml["support_milhar"], 184000.0)
+        self.assertEqual(ml["resistance_milhar"], 185000.0)
+        self.assertTrue(ml["blocked_buy_wall"])
+        self.assertFalse(ml["blocked_sell_wall"])
+
+        bars, _ = _make_synthetic_sessions(184000.0, tick=5.0, n_days=3)
+        ch = analyze_channel_and_frequency(bars, window=24)
+        self.assertGreater(ch["frequency_pts"], 0.0)
+
+        flow = {"available": True, "flow_bias": "COMPRADOR", "delta_pct": 22.0, "book_imbalance_pct": 63.0, "big_buy_lots": 5, "big_sell_lots": 1}
+        ctx = {"trend": "ALTA", "m15_trend": "ALTA", "adx14": 28.0, "rvol": 1.6}
+        ml_free = analyze_milhar_levels(win, 184400.0)
+        sc = compute_institutional_score("buy", ctx, flow, ml_free, {**ch, "overbought": False})
+        self.assertGreaterEqual(sc["score"], 90)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -51,6 +51,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "mtf_m15_filter_enabled": True,
     "rvol_filter_enabled": True,
     "min_rvol": 1.2,
+    "institutional_filter_enabled": True,
+    "min_institutional_score": 70,
+    "milhar_wall_filter_enabled": True,
+    "flow_filter_enabled": True,
 }
 
 
